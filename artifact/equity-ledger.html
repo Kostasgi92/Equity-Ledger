@@ -232,6 +232,14 @@ tr.data-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent
 .drain-label { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .drain-label strong { color: var(--fg); font-weight: 600; }
 .drain-mini { height: 4px; width: 100%; min-width: 90px; margin-top: 6px; margin-left: auto; box-shadow: none; }
+.payoff-list { display: grid; gap: 22px; }
+.payoff-item + .payoff-item { padding-top: 22px; border-top: 1px solid var(--border); }
+.payoff-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.payoff-head strong { display: block; font: 600 18px var(--font-serif); color: var(--primary); }
+.payoff-head span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.payoff-settle { text-align: right; } .payoff-settle span { margin: 0; } .payoff-settle strong { font: 700 18px var(--font-sans); letter-spacing: -.03em; color: var(--fg); font-variant-numeric: tabular-nums; }
+.payoff-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.drain-label a { color: var(--primary); }
 .range-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px; align-items: center; }
 .range-row span { font-size: 12px; }
 .plain-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 12px; line-height: 1.55; color: var(--fg); }
@@ -1061,6 +1069,21 @@ function marketStatusBar(summary) {
     <button class="button button-secondary" data-action="edit-fx" style="margin-left:auto;padding:7px 11px">Set FX rates</button></div>`;
 }
 
+function debtPayoffPanel() {
+  const ms = state.liabilities.map((l) => ({ l, m: loanMetrics(l, state) })).filter(({ m }) => m.left > 0);
+  if (!ms.length) return '';
+  const items = ms.map(({ l, m }) => {
+    const total = m.totalRepayable || null;
+    return `<div class="payoff-item">
+      <div class="payoff-head"><div><strong>${esc(l.name)}</strong><span>${pct(l.rate, 2)} APR · ${m.payment ? `${gbp(m.payment, 2)}/month` : 'no payment set'}${m.projectedEnd ? ` · last payment ${monthLabel(m.projectedEnd)}` : ''}</span></div>
+        ${m.settlement !== null ? `<div class="payoff-settle"><span>Settle today</span><strong>${gbp(m.settlement)}</strong></div>` : ''}</div>
+      ${total ? drainBar(m.left, total, `${gbp(m.left)} left of ${gbp(total)}`) : `<div class="drain-label" style="margin-top:12px"><span>${gbp(m.left)} left to repay</span><a href="#liabilities">Add the original total to see progress</a></div>`}
+      ${m.termMonths ? drainBar(m.paymentsLeft, m.termMonths, `${m.paymentsLeft} of ${m.termMonths} months left`, true) : m.paymentsLeft ? `<div class="drain-label" style="margin-top:8px"><span>${m.paymentsLeft} payments left</span></div>` : ''}
+      ${m.interestSaved ? `<p class="payoff-note">Settling today would save about <strong class="positive">${gbp(m.interestSaved)}</strong> in interest.</p>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Debt payoff</h2><p class="panel-kicker">How much is left on each loan, and how long to go</p></div><a class="button button-secondary" href="#liabilities">Liabilities</a></div><div class="panel-body payoff-list">${items}</div></div>`;
+}
 function overviewView(s) {
   const refreshBtn = `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh prices'}</button>`;
   if (!state.holdings.length && !state.liabilities.length) {
@@ -1078,6 +1101,7 @@ function overviewView(s) {
       <div class="stat-card"><div class="stat-label">Invested assets</div><div class="stat-value">${gbp(s.totalValueGbp)}</div><div class="stat-meta"><span>${state.holdings.length} holding${state.holdings.length === 1 ? '' : 's'} across ${s.currencyMix.length} currenc${s.currencyMix.length === 1 ? 'y' : 'ies'}</span></div></div>
       <div class="stat-card"><div class="stat-label">Est. annual income</div><div class="stat-value">${gbp(s.annualIncomeGbp)}</div><div class="stat-meta"><span>${pct(s.weightedYield, 2)} weighted yield</span></div></div>
     </div>
+    ${debtPayoffPanel()}
     ${openAlerts.length ? `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Price alerts</h2><p class="panel-kicker">Thresholds measured from each holding's reference price.</p></div></div><div class="panel-body">
       ${openAlerts.map((a) => { const h = holdingById.get(a.holdingId); return `<div class="activity-item"><span class="activity-mark">${icon('bell')}</span><div><strong>${esc(h?.ticker || 'Holding')} ${a.direction === 'upper' ? 'rose above' : 'fell below'} ${money(a.thresholdPrice, h?.currency || 'GBP')}</strong><p>Triggered at ${money(a.triggeredPrice, h?.currency || 'GBP')} · ${a.direction === 'upper' ? '+' : '−'}${a.configuredPercent}% from ${money(a.referencePrice, h?.currency || 'GBP')} · ${relTime(a.crossedAt)}</p></div>${a.acknowledgedAt ? badge('paused', 'Acknowledged') : `<button class="button button-secondary" data-action="ack-alert" data-id="${a.id}">Acknowledge</button>`}</div>`; }).join('')}
     </div></div>` : ''}
