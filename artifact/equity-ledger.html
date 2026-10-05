@@ -357,17 +357,71 @@ function priceStatus(h) {
 }
 function valueGbp(h, fx) { return Number(h.units) * Number(h.price) * (fx[h.currency] || 0); }
 
-/* Liabilities: balanceGbp = remaining to repay (all instalments, interest included);
-   settlementGbp = the lender's pay-off-today figure, used for net worth when known. */
-const owedToday = (l) => (l.settlementGbp !== null && l.settlementGbp !== undefined && l.settlementGbp !== '' ? Number(l.settlementGbp) : Number(l.balanceGbp)) || 0;
-const hasSettlement = (l) => l.settlementGbp !== null && l.settlementGbp !== undefined && l.settlementGbp !== '';
-const CADENCE_YEARS = { weekly: 1 / 52, monthly: 1 / 12, quarterly: 1 / 4, annually: 1 };
-const periodRate = (annualPct, cadence) => Math.pow(1 + Number(annualPct) / 100, CADENCE_YEARS[cadence] || 1 / 12) - 1;
+/* Liabilities. balanceGbp = everything left to repay (all instalments, interest included).
+   The settlement figure and total loan cost are estimated from the APR, the monthly payment
+   and, optionally, the amount borrowed — never entered by hand. */
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function parseEndMonth(text) {
+  if (!text) return null;
+  if (/^\d{4}-\d{2}$/.test(text)) return text;
+  const m = String(text).toLowerCase().match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{4})\b/);
+  if (m) return `${m[2]}-${String(MONTHS.indexOf(m[1]) + 1).padStart(2, '0')}`;
+  const n = String(text).match(/\b(\d{1,2})[/.-](\d{4})\b/);
+  return n ? `${n[2]}-${n[1].padStart(2, '0')}` : null;
+}
+const monthLabel = (ym) => { if (!ym) return '—'; const [y, m] = ym.split('-').map(Number); return new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1))); };
+const addMonths = (ym, k) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + k, 1)); return d.toISOString().slice(0, 7); };
+const monthsInclusive = (fromYm, toYm) => { const [a, b] = fromYm.split('-').map(Number); const [c, d] = toYm.split('-').map(Number); return (c - a) * 12 + (d - b) + 1; };
+function loanMetrics(l, state, now = new Date()) {
+  const left = Math.max(0, Number(l.balanceGbp) || 0);
+  const apr = Math.max(0, Number(l.rate) || 0);
+  const i = Math.pow(1 + apr / 100, 1 / 12) - 1;
+  const sched = state.schedules.find((sc) => sc.type === 'liability_payment' && sc.liabilityId === l.id && sc.cadence === 'monthly' && sc.status !== 'completed');
+  const thisMonth = (sched?.nextDueDate || now.toISOString()).slice(0, 7);
+  const endMonth = l.endMonth || null;
+  let payment = Number(l.monthlyPayment) > 0 ? Number(l.monthlyPayment) : sched ? Number(sched.amountGbp) : null;
+  let paymentSource = Number(l.monthlyPayment) > 0 ? 'entered' : sched ? 'schedule' : null;
+  if (!payment && endMonth && left > 0) { const n = monthsInclusive(thisMonth, endMonth); if (n > 0) { payment = left / n; paymentSource = 'derived'; } }
+  const out = { left, apr, payment, paymentSource, endMonth, settlement: null, settlementBase: null, earlyCharge: null, interestSaved: null, paymentsLeft: null, projectedEnd: null, borrowed: Number(l.borrowedGbp) > 0 ? Number(l.borrowedGbp) : null, termMonths: null, totalRepayable: null, totalInterest: null, paidSoFar: null, warning: null };
+  if (left <= 0) { Object.assign(out, { settlement: 0, settlementBase: 0, earlyCharge: 0, interestSaved: 0, paymentsLeft: 0 }); }
+  else if (payment > 0) {
+    // Payment schedule: the final month wins when known (instalments rarely divide the balance exactly).
+    let flows;
+    const nByEnd = endMonth ? monthsInclusive(thisMonth, endMonth) : 0;
+    if (nByEnd > 0) {
+      const p = left / nByEnd; flows = Array(nByEnd).fill(p);
+      if (paymentSource !== 'derived' && Math.abs(p - payment) / payment > 0.05) out.warning = `${gbp(left, 2)} over ${nByEnd} payments to ${monthLabel(endMonth)} is ${gbp(p, 2)} a month, not ${gbp(payment, 2)}. Check the amount left, the payment or the final month.`;
+    } else {
+      const full = Math.floor(left / payment + 1e-9); const rem = left - full * payment;
+      flows = Array(full).fill(payment); if (rem > 0.005) flows.push(rem);
+    }
+    let pv = 0;
+    flows.forEach((p, t) => { pv += p / Math.pow(1 + i, t + 1); });
+    const paymentsLeft = flows.length;
+    // UK consumer credit: the lender may add up to 58 days' interest (28 days when a year or less remains).
+    const days = paymentsLeft > 12 ? 58 : 28;
+    const charge = pv * (Math.pow(1 + apr / 100, days / 365) - 1);
+    Object.assign(out, { settlementBase: round(pv), earlyCharge: round(charge), settlement: round(Math.min(left, pv + charge)), paymentsLeft, projectedEnd: addMonths(thisMonth, paymentsLeft - 1) });
+    out.interestSaved = round(Math.max(0, left - out.settlement));
+    if (out.borrowed && apr > 0) {
+      const x = 1 - (out.borrowed * i) / payment;
+      if (x <= 0) out.warning = 'This monthly payment would never repay the amount borrowed at this APR. Check the figures.';
+      else {
+        const term = Math.round(-Math.log(x) / Math.log(1 + i));
+        out.termMonths = term; out.totalRepayable = round(term * payment); out.totalInterest = round(out.totalRepayable - out.borrowed);
+        out.paidSoFar = round(Math.max(0, out.totalRepayable - left));
+        if (term < paymentsLeft - 1) out.warning = `The amount borrowed implies a ${term}-month loan, shorter than the ${paymentsLeft} payments still left. Check the amount borrowed, APR or payment.`;
+      }
+    } else if (out.borrowed) { out.termMonths = null; out.totalRepayable = round(out.borrowed); out.totalInterest = 0; }
+  }
+  return out;
+}
+const owedToday = (l, state) => { const m = loanMetrics(l, state); return m.settlement ?? m.left; };
 function buildSummary(state) {
   const fx = fxToGbp(state);
   const holdings = state.holdings.map((h) => ({ ...h, valueGbp: valueGbp(h, fx), priceStatus: priceStatus(h) }));
   const totalValueGbp = holdings.reduce((s, h) => s + h.valueGbp, 0);
-  const liabilitiesGbp = state.liabilities.reduce((s, l) => s + owedToday(l), 0);
+  const liabilitiesGbp = state.liabilities.reduce((s, l) => s + owedToday(l, state), 0);
   const remainingToRepayGbp = state.liabilities.reduce((s, l) => s + Number(l.balanceGbp), 0);
   const dayChangeGbp = holdings.reduce((s, h) => s + h.valueGbp * (Number(h.dayChange) / 100), 0);
   const annualIncomeGbp = holdings.reduce((s, h) => s + h.valueGbp * (Number(h.dividendYield) / 100), 0);
@@ -473,16 +527,7 @@ function applyOccurrence(state, schedule, dueDate) {
     const reduction = Math.min(Number(schedule.amountGbp), Number(l.balanceGbp));
     const newBalance = Math.max(0, Number(l.balanceGbp) - reduction);
     l.balanceGbp = round(newBalance);
-    let settlementNote = '';
-    if (hasSettlement(l)) {
-      // Interest accrues on the pay-off figure for the period; the payment covers it first.
-      const interest = Number(l.settlementGbp) * periodRate(l.rate, schedule.cadence);
-      const projected = Number(l.settlementGbp) + interest - reduction;
-      const newSettlement = newBalance === 0 ? 0 : Math.min(newBalance, projected > 0 ? projected : newBalance);
-      l.settlementGbp = round(newSettlement); l.settlementEstimated = true;
-      settlementNote = `; settlement now about £${newSettlement.toFixed(2)} (£${interest.toFixed(2)} of the payment was interest)`;
-    }
-    const message = `Paid £${reduction.toFixed(2)} towards ${l.name}; £${newBalance.toFixed(2)} left to repay${settlementNote}`;
+    const message = `Paid £${reduction.toFixed(2)} towards ${l.name}; £${newBalance.toFixed(2)} left to repay`;
     state.occurrences.unshift({ id: newId(), scheduleId: schedule.id, dueDate, status: 'applied', amountGbp: Number(schedule.amountGbp), balanceReductionGbp: round(reduction), message, appliedAt: new Date().toISOString() });
     logActivity(state, 'Recurring debt payment applied', message, 'recurring');
     Object.assign(schedule, { nextDueDate, status: newBalance === 0 ? 'completed' : 'active', failureMessage: null, updatedAt: new Date().toISOString() });
@@ -742,7 +787,7 @@ function advisorContext(state, summary) {
       dividendYield: Number(h.dividendYield) || 0, priceStatus: h.priceStatus, priceTimestamp: h.priceUpdatedAt || null,
       account: h.accountId && accountMap.get(h.accountId) ? { accountType: accountMap.get(h.accountId).accountType, classification: accountMap.get(h.accountId).classification } : null,
     })),
-    liabilities: state.liabilities.map((l) => ({ name: l.name, remainingToRepayGbp: Number(l.balanceGbp), settlementGbp: hasSettlement(l) ? Number(l.settlementGbp) : null, rate: Number(l.rate), due: l.due })),
+    liabilities: state.liabilities.map((l) => { const m = loanMetrics(l, state); return { name: l.name, aprPercent: Number(l.rate), leftToRepayGbp: m.left, estimatedSettlementGbp: m.settlement, monthlyPaymentGbp: m.payment ? round(m.payment) : null, paymentsLeft: m.paymentsLeft, finalPayment: m.projectedEnd || m.endMonth || l.due || null, borrowedGbp: m.borrowed, totalRepayableGbp: m.totalRepayable, totalInterestGbp: m.totalInterest }; }),
     summary: {
       totalValueGbp: summary.totalValueGbp, liabilitiesGbp: summary.liabilitiesGbp, netWorthGbp: summary.netWorthGbp, annualIncomeGbp: summary.annualIncomeGbp,
       weightedYield: summary.weightedYield, allocation: summary.allocation.map(({ label, valueGbp, percentage }) => ({ label, valueGbp, percentage })),
@@ -868,6 +913,8 @@ const reviewsCol = () => portfolioRef().collection('reviews');
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    // Store the calculated loan figures too, so the briefing job can read them.
+    state.liabilities.forEach((l) => { const m = loanMetrics(l, state); l.estimates = { settlementGbp: m.settlement, monthlyPaymentGbp: m.payment ? round(m.payment) : null, paymentsLeft: m.paymentsLeft, finalPaymentMonth: m.projectedEnd || m.endMonth, totalRepayableGbp: m.totalRepayable, totalInterestGbp: m.totalInterest, futureInterestGbp: m.interestSaved }; });
     const json = JSON.stringify(state);
     if (json === lastSavedJson) return;
     saving = saving.then(async () => {
@@ -887,6 +934,7 @@ function hydrate(data) {
   const s = { ...base, ...(data ? JSON.parse(JSON.stringify(data)) : {}) };
   for (const k of ['holdings', 'accounts', 'liabilities', 'schedules', 'occurrences', 'alerts', 'activity']) if (!Array.isArray(s[k])) s[k] = [];
   s.fx = { ...base.fx, ...(s.fx || {}) }; s.targets = { ...base.targets, ...(s.targets || {}) };
+  s.liabilities.forEach((l) => { if (!l.endMonth) l.endMonth = parseEndMonth(l.due); delete l.settlementGbp; delete l.settlementEstimated; delete l.settlementUpdatedAt; });
   return s;
 }
 
@@ -1048,26 +1096,29 @@ function holdingsView(s) {
 }
 
 function liabilitiesView(s) {
-  const rows = state.liabilities.map((l) => {
-    const settle = hasSettlement(l); const saved = settle ? Number(l.balanceGbp) - Number(l.settlementGbp) : null;
-    return `<tr class="data-row"><td><strong>${esc(l.name)}</strong><span class="price-source">${esc(l.currency)} · ${pct(l.rate, 2)} · ends ${esc(l.due)}</span></td>
-      <td class="r mono">${gbp(l.balanceGbp, 2)}</td>
-      <td class="r mono">${settle ? `${gbp(l.settlementGbp, 2)}<span class="price-source">${l.settlementEstimated ? 'Estimated after payments' : `From lender${l.settlementUpdatedAt ? ` · ${fmtDate(l.settlementUpdatedAt)}` : ''}`}</span>` : `<button class="button button-secondary" style="padding:6px 10px" data-action="edit-liability" data-id="${l.id}">Add figure</button>`}</td>
-      <td class="r mono ${saved > 0 ? 'positive' : ''}">${saved === null ? '—' : gbp(Math.max(saved, 0), 2)}</td>
-      <td class="r mono">${gbp(owedToday(l) * Number(l.rate) / 100)}</td>
-      <td><div class="row-actions"><button class="button button-icon" data-action="edit-liability" data-id="${l.id}" aria-label="Edit ${esc(l.name)}">${icon('edit')}</button><button class="button button-icon" data-action="delete-liability" data-id="${l.id}" aria-label="Delete ${esc(l.name)}">${icon('trash')}</button></div></td></tr>`;
-  }).join('');
-  const weighted = s.liabilitiesGbp ? state.liabilities.reduce((x, l) => x + owedToday(l) * Number(l.rate), 0) / s.liabilitiesGbp : 0;
-  const futureInterest = state.liabilities.filter(hasSettlement).reduce((x, l) => x + Math.max(0, Number(l.balanceGbp) - Number(l.settlementGbp)), 0);
-  const missing = state.liabilities.filter((l) => !hasSettlement(l)).length;
-  return pageHeading('Liabilities', 'What you owe.', 'Mortgages, loans and cards, held against your net worth. Net worth uses each lender’s settlement figure when you add one; recurring payments reduce what is left to repay.', `<button class="button button-primary" data-action="add-liability">${icon('plus')}Add liability</button>`) +
+  const ms = state.liabilities.map((l) => ({ l, m: loanMetrics(l, state) }));
+  const rows = ms.map(({ l, m }) => `<tr class="data-row">
+      <td><strong>${esc(l.name)}</strong><span class="price-source">${pct(l.rate, 2)} APR · ${m.payment ? `${gbp(m.payment, 2)}/month` : 'no payment set'} · ${m.projectedEnd ? `last payment ${monthLabel(m.projectedEnd)}` : m.endMonth ? `ends ${monthLabel(m.endMonth)}` : esc(l.due || '')}</span></td>
+      <td class="r mono">${gbp(m.left, 2)}${m.paymentsLeft ? `<span class="price-source">${m.paymentsLeft} payment${m.paymentsLeft === 1 ? '' : 's'}</span>` : ''}</td>
+      <td class="r mono">${m.settlement === null ? `<span class="price-source">Add a monthly payment or final month</span>` : `${gbp(m.settlement, 2)}<span class="price-source">Estimate</span>`}</td>
+      <td class="r mono ${m.interestSaved > 0 ? 'positive' : ''}">${m.interestSaved === null ? '—' : gbp(m.interestSaved, 2)}</td>
+      <td class="r mono">${m.totalRepayable === null ? (m.borrowed ? '—' : `<button class="button button-secondary" style="padding:6px 10px" data-action="edit-liability" data-id="${l.id}">Add amount borrowed</button>`) : `${gbp(m.totalRepayable, 2)}<span class="price-source">${gbp(m.totalInterest, 2)} interest</span>`}</td>
+      <td><div class="row-actions"><button class="button button-icon" data-action="edit-liability" data-id="${l.id}" aria-label="Edit ${esc(l.name)}">${icon('edit')}</button><button class="button button-icon" data-action="delete-liability" data-id="${l.id}" aria-label="Delete ${esc(l.name)}">${icon('trash')}</button></div></td></tr>
+    ${m.warning ? `<tr><td colspan="6" style="border-top:0;padding-top:0"><span class="negative" style="font-size:11px">${esc(m.warning)}</span></td></tr>` : ''}`).join('');
+  const futureInterest = ms.reduce((x, { m }) => x + (m.interestSaved || 0), 0);
+  const cards = ms.filter(({ m }) => m.totalRepayable !== null && m.termMonths).map(({ l, m }) => `<div class="account-card"><span class="tag">${esc(l.name)}</span>
+      <h3>${gbp(m.totalRepayable, 2)}</h3><p>Total you will repay if you pay to the last day: ${gbp(m.borrowed, 2)} borrowed + ${gbp(m.totalInterest, 2)} interest over ${m.termMonths} months.</p>
+      <div class="account-value"><span class="stat-label">Paid so far</span><strong>${gbp(m.paidSoFar, 2)}</strong></div>
+      <div class="account-value" style="margin-top:8px"><span class="stat-label">Settle today instead</span><strong class="positive">saves ${gbp(m.interestSaved, 2)}</strong></div></div>`).join('');
+  return pageHeading('Liabilities', 'What you owe.', 'Enter what is left to repay, the APR and the monthly payment. The ledger estimates what it would cost to settle today and what the loan costs in total.', `<button class="button button-primary" data-action="add-liability">${icon('plus')}Add liability</button>`) +
     exampleBanner() +
-    `<div class="overview-grid" style="margin-bottom:16px"><div class="stat-card dark"><div class="stat-label">Owed today</div><div class="stat-value">${gbp(s.liabilitiesGbp)}</div><div class="stat-meta">${missing ? `Settlement figures for ${state.liabilities.length - missing} of ${state.liabilities.length}; the rest use what is left to repay` : 'What it would cost to settle everything today'}</div></div>
+    `<div class="overview-grid" style="margin-bottom:16px"><div class="stat-card dark"><div class="stat-label">Owed today</div><div class="stat-value">${gbp(s.liabilitiesGbp)}</div><div class="stat-meta">Estimated cost to settle everything now</div></div>
       <div class="stat-card"><div class="stat-label">Left to repay</div><div class="stat-value">${gbp(s.remainingToRepayGbp)}</div><div class="stat-meta">All remaining instalments, interest included</div></div>
-      <div class="stat-card"><div class="stat-label">Future interest</div><div class="stat-value">${gbp(futureInterest)}</div><div class="stat-meta">Saved if you settled today${missing ? ' (loans with a settlement figure)' : ''}</div></div></div>
-    <div class="panel">${rows ? `<div class="table-wrap"><table><thead><tr><th>Liability</th><th class="r">Left to repay</th><th class="r">Settlement today</th><th class="r">Interest saved</th><th class="r">Annual interest</th><th><span hidden>Actions</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      <div class="stat-card"><div class="stat-label">Future interest</div><div class="stat-value">${gbp(futureInterest)}</div><div class="stat-meta">Saved if you settled everything today</div></div></div>
+    <div class="panel">${rows ? `<div class="table-wrap"><table><thead><tr><th>Liability</th><th class="r">Left to repay</th><th class="r">Settle today</th><th class="r">Interest saved</th><th class="r">Total cost of loan</th><th><span hidden>Actions</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : emptyBlock('liabilities', 'No liabilities recorded', 'Add a mortgage, loan or card balance so net worth reflects what you owe.', `<button class="button button-primary" data-action="add-liability">${icon('plus')}Add liability</button>`)}</div>
-    <p class="panel-kicker" style="margin-top:10px">Annual interest is estimated as rate × settlement figure (${pct(weighted, 2)} weighted). Update the settlement figure from your lender’s app from time to time; after automatic payments it is an estimate.</p>`;
+    ${cards ? `<div class="section-heading"><h2>Full cost of each loan</h2></div><div class="account-grid">${cards}</div>` : ''}
+    <p class="panel-kicker" style="margin-top:10px;line-height:1.6">Settlement estimates discount the remaining payments at the APR and add the most a UK lender can charge for early settlement (58 days’ interest, or 28 when a year or less remains). Your lender’s quote can differ slightly. Net worth uses these estimates.</p>`;
 }
 
 function recurringView() {
@@ -1346,24 +1397,28 @@ function accountForm(a) {
 }
 function liabilityForm(l) {
   const isNew = !l; l = l || { currency: 'GBP' };
-  openModal(formShell(isNew ? 'Add a liability' : `Edit ${esc(l.name)}`, 'Amounts in pounds sterling. Your lender’s app shows both figures.',
+  const linked = !isNew && state.schedules.find((sc) => sc.type === 'liability_payment' && sc.liabilityId === l.id && sc.cadence === 'monthly' && sc.status !== 'completed');
+  openModal(formShell(isNew ? 'Add a liability' : `Edit ${esc(l.name)}`, 'Amounts in pounds sterling. The settlement figure and total loan cost are calculated for you.',
     field('l-name', 'Name', `<input id="l-name" required maxlength="80" value="${esc(l.name || '')}" placeholder="Mortgage, car loan">`, true) +
-    field('l-cur', 'Original currency', `<select id="l-cur">${['GBP', 'USD', 'EUR'].map((c) => `<option ${c === l.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>`) +
     field('l-bal', 'Left to repay (GBP)', `<input id="l-bal" type="number" min="0" step="0.01" required value="${l.balanceGbp ?? ''}">`, false, 'All remaining instalments, interest included. Automatic payments reduce this.') +
-    field('l-settle', 'Settlement amount (GBP)', `<input id="l-settle" type="number" min="0" step="0.01" value="${hasSettlement(l) ? l.settlementGbp : ''}">`, false, 'Optional. The lender’s pay-off-today figure. Used for net worth.') +
-    field('l-rate', 'Interest rate %', `<input id="l-rate" type="number" min="0" max="100" step="0.01" required value="${l.rate ?? ''}">`) +
-    field('l-due', 'Due', `<input id="l-due" required maxlength="40" value="${esc(l.due || '')}" placeholder="Mar 2031, Monthly">`),
+    field('l-rate', 'APR %', `<input id="l-rate" type="number" min="0" max="100" step="0.01" required value="${l.rate ?? ''}">`) +
+    field('l-pay', 'Monthly payment (GBP)', `<input id="l-pay" type="number" min="0" step="0.01" value="${Number(l.monthlyPayment) > 0 ? l.monthlyPayment : ''}" placeholder="${linked ? `${linked.amountGbp} from your schedule` : 'Optional'}">`, false, linked ? 'Leave empty to use your recurring payment.' : 'Optional if you enter the final payment month.') +
+    field('l-end', 'Final payment month', `<input id="l-end" type="month" value="${esc(l.endMonth || parseEndMonth(l.due) || '')}">`) +
+    field('l-borrowed', 'Amount borrowed (GBP)', `<input id="l-borrowed" type="number" min="0" step="0.01" value="${Number(l.borrowedGbp) > 0 ? l.borrowedGbp : ''}" placeholder="Optional">`, false, 'The original loan amount. Used to work out the total cost of the loan.') +
+    field('l-cur', 'Original currency', `<select id="l-cur">${['GBP', 'USD', 'EUR'].map((c) => `<option ${c === l.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>`),
     isNew ? 'Add liability' : 'Save changes'), (f) => {
-    const settleRaw = val(f, 'l-settle');
-    const data = { name: val(f, 'l-name'), currency: val(f, 'l-cur'), balanceGbp: Number(val(f, 'l-bal')), settlementGbp: settleRaw === '' ? null : Number(settleRaw), rate: Number(val(f, 'l-rate')), due: val(f, 'l-due') };
-    if (!data.name || !data.due) return 'Enter a name and when it is due.';
+    const num = (id) => { const v = val(f, id); return v === '' ? null : Number(v); };
+    const data = { name: val(f, 'l-name'), currency: val(f, 'l-cur'), balanceGbp: Number(val(f, 'l-bal')), rate: Number(val(f, 'l-rate')), monthlyPayment: num('l-pay'), endMonth: val(f, 'l-end') || null, borrowedGbp: num('l-borrowed') };
+    if (!data.name) return 'Enter a name.';
     if (!Number.isFinite(data.balanceGbp) || data.balanceGbp < 0) return 'Left to repay must be zero or more.';
-    if (data.settlementGbp !== null && (!Number.isFinite(data.settlementGbp) || data.settlementGbp < 0)) return 'Settlement amount must be zero or more.';
-    if (data.settlementGbp !== null && data.settlementGbp > data.balanceGbp * 1.1) return 'The settlement amount is usually below what is left to repay. Check both figures.';
-    if (data.settlementGbp !== null && (isNew || Number(l.settlementGbp) !== data.settlementGbp)) { data.settlementUpdatedAt = new Date().toISOString(); data.settlementEstimated = false; }
-    if (!Number.isFinite(data.rate) || data.rate < 0 || data.rate > 100) return 'Rate must be between 0 and 100.';
+    if (!Number.isFinite(data.rate) || data.rate < 0 || data.rate > 100) return 'APR must be between 0 and 100.';
+    for (const [k, label] of [['monthlyPayment', 'Monthly payment'], ['borrowedGbp', 'Amount borrowed']]) if (data[k] !== null && (!Number.isFinite(data[k]) || data[k] <= 0)) return `${label} must be greater than zero.`;
+    if (data.endMonth && !/^\d{4}-\d{2}$/.test(data.endMonth)) return 'Choose a valid final payment month.';
+    data.due = data.endMonth ? monthLabel(data.endMonth) : (l.due || '');
+    data.settlementGbp = null; data.settlementEstimated = null; data.settlementUpdatedAt = null;
     if (isNew) state.liabilities.push({ id: newId(), ...data, createdAt: new Date().toISOString() }); else Object.assign(l, data);
-    logActivity(state, isNew ? 'Liability added' : 'Liability updated', `${data.name}: ${gbp(data.balanceGbp, 2)} left to repay${data.settlementGbp !== null ? `, ${gbp(data.settlementGbp, 2)} to settle today` : ''} at ${data.rate}%`, 'liability');
+    const m = loanMetrics(isNew ? state.liabilities[state.liabilities.length - 1] : l, state);
+    logActivity(state, isNew ? 'Liability added' : 'Liability updated', `${data.name}: ${gbp(data.balanceGbp, 2)} left to repay at ${data.rate}% APR${m.settlement !== null ? `; about ${gbp(m.settlement, 2)} to settle today` : ''}`, 'liability');
     save(); render(); toast(isNew ? 'Liability added.' : 'Liability saved.');
   });
 }
@@ -1466,7 +1521,7 @@ function loadExamples() {
     ['CASH', 'Cash reserve (example)', 'cash', 'GBP', 5000, 1, 4.25, 'Cash', null],
   ];
   ex.forEach(([ticker, name, assetClass, currency, u, price, y, theme, accountId]) => state.holdings.push({ id: newId(), ticker, name, assetClass, currency, units: u, price, referencePrice: price, dividendYield: y, theme, accountId, pricingMethod: assetClass === 'crypto' ? 'live' : 'manual', dayChange: 0, priceUpdatedAt: null, priceError: null, upperAlertPercent: null, lowerAlertPercent: null, updatedAt: now, example: true }));
-  state.liabilities.push({ id: newId(), name: 'Car loan (example)', currency: 'GBP', balanceGbp: 6500, rate: 6.9, due: 'Mar 2028', example: true });
+  state.liabilities.push({ id: newId(), name: 'Car loan (example)', currency: 'GBP', balanceGbp: 6500, rate: 6.9, endMonth: addMonths(todayUtc().slice(0, 7), 23), borrowedGbp: 9000, due: '', example: true });
   logActivity(state, 'Example portfolio loaded', 'Sample holdings and a liability were added. Clear them when you add your own.', 'holding');
   save(); render(); toast('Example portfolio loaded.');
 }
