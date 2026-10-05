@@ -1379,7 +1379,6 @@ const NEWS_SOURCES = [
   { name: 'The Wall Street Journal', domains: ['wsj.com'], paywall: true },
   { name: 'The Economist', domains: ['economist.com'], paywall: true },
 ];
-const PREMIUM_SOURCES = ['Financial Times', 'The New York Times', 'The Wall Street Journal', 'The Economist'];
 const isPaywalled = (publisher) => Boolean(NEWS_SOURCES.find((x) => x.name === publisher)?.paywall);
 const sourceFor = (url) => { const h = hostOf(url); return NEWS_SOURCES.find((s) => s.domains.some((d) => h === d || h.endsWith(`.${d}`))) || null; };
 const briefingUi = { doc: null, loaded: false, publisher: 'all', requesting: false, requestedAt: Number(store.get('el.briefingRequestedAt')) || 0, error: null };
@@ -1449,9 +1448,7 @@ function newsView() {
     ${groups.length ? `<div class="news-groups">${groups.map((g) => { const h = held.get(g.ticker); return `<div class="panel"><div class="panel-header"><div class="ticker-cell"><span class="ticker-mark">${esc(g.ticker.slice(0, 4))}</span><div><strong>${esc(h?.name || g.name || g.ticker)}</strong><span>${esc(g.ticker)}${h ? ` · ${ASSET_CLASSES[h.assetClass] || ''}` : ''}</span></div></div></div><div class="panel-body news-list">${g.items.length ? g.items.map((i) => newsItem(i)).join('') : `<p class="panel-kicker">${pf === 'all' ? 'No notable news in the last week.' : 'Nothing from this publisher.'}</p>`}</div></div>`; }).join('')}</div>`
       : `<div class="panel">${emptyBlock('holdings', state.holdings.length ? 'No holding news yet' : 'Add holdings to get their news', state.holdings.length ? 'News for your holdings appears after the next briefing update.' : 'Each briefing searches news for every holding in your ledger. Add your investments on the Holdings page.', state.holdings.length ? '' : '<a class="button button-secondary" href="#holdings">Go to holdings</a>')}</div>`}
     ${missing.length ? `<p class="panel-kicker" style="margin-top:10px">${missing.map((h) => esc(h.ticker)).join(', ')} will be included in the next update.</p>` : ''}
-    ${premiumPanel(b, pass)}
-    <div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today</p></div></div>
-      <div class="panel-body news-list">${b.generalNews.filter(pass).map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>
+    ${headlinesPanel(b, pass)}
     <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; articles marked Subscriber need you to sign in.</p>` +
     cmcSection() + cryptoSection();
 }
@@ -1510,15 +1507,16 @@ function cmcOverviewCard() {
         <p class="panel-kicker">BTC dominance ${d.btcDominance === null ? '—' : pct(d.btcDominance, 1)} · Altcoin season ${d.altSeason ?? '—'}/100. Context for long-term decisions, not a trading signal.</p>
       </div></div></div></div>`;
 }
-function premiumPanel(b, pass) {
-  const items = b.premiumNews.filter(pass);
-  const groups = PREMIUM_SOURCES.map((name) => ({ name, items: items.filter((i) => i.publisher === name).slice(0, 6) })).filter((g) => g.items.length);
-  const body = groups.length
-    ? `<div class="news-groups">${groups.map((g) => `<div><div class="stat-label" style="margin-bottom:4px">${esc(g.name)}</div><div class="news-list">${g.items.map((i) => newsItem(i)).join('')}</div></div>`).join('')}</div>`
-    : `<p class="panel-kicker" style="line-height:1.6">${b.premiumStatus === 'unavailable'
-        ? 'The briefing job could not reach these feeds. Allow www.ft.com, rss.nytimes.com, feeds.content.dowjones.io and www.economist.com in the cloud environment’s network settings, then update the briefing.'
-        : b.premiumNews.length ? 'No headlines from these publishers match this filter.' : 'Headlines from these publishers appear after the next briefing update.'}</p>`;
-  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">FT, NYT, WSJ &amp; The Economist</h2><p class="panel-kicker">Free headlines from each publisher’s RSS feed. Articles open on their site, where you sign in with your subscription.</p></div></div><div class="panel-body">${body}</div></div>`;
+function headlinesPanel(b, pass) {
+  // One list: WebSearch headlines and the FT / NYT / WSJ / Economist RSS headlines, newest first.
+  const seen = new Set();
+  const items = [...b.generalNews, ...b.premiumNews].filter(pass)
+    .filter((i) => { const k = i.url; if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((x, y) => (Date.parse(y.publishedAt || '') || 0) - (Date.parse(x.publishedAt || '') || 0));
+  const note = b.premiumStatus === 'unavailable'
+    ? `<div class="market-status warning" style="margin:0 0 8px">${icon('info')}<span>FT, NYT, WSJ and The Economist headlines could not be loaded in the last update.</span></div>` : '';
+  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today, including the FT, NYT, WSJ and The Economist</p></div></div>
+    <div class="panel-body news-list">${note}${items.map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>`;
 }
 function cryptoSection() {
   const ci = radarIntelligence();
