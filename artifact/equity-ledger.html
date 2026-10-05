@@ -1366,7 +1366,7 @@ function reviewPanel(rv, canSave) {
 /* =========================================================================
    News & market briefing (written by the scheduled briefing job)
    ========================================================================= */
-const BRIEFING_TRIGGER_ID = 'trig_01FQeDcQ7SeoFPzfD44sMhWA';
+const BRIEFING_TRIGGER_ID = 'trig_01H6s2fFC8eStTfvfhNuBB4H';
 const NEWS_SOURCES = [
   { name: 'Yahoo Finance', domains: ['yahoo.com'] },
   { name: 'Bloomberg', domains: ['bloomberg.com'] },
@@ -1516,7 +1516,7 @@ function premiumPanel(b, pass) {
   const body = groups.length
     ? `<div class="news-groups">${groups.map((g) => `<div><div class="stat-label" style="margin-bottom:4px">${esc(g.name)}</div><div class="news-list">${g.items.map((i) => newsItem(i)).join('')}</div></div>`).join('')}</div>`
     : `<p class="panel-kicker" style="line-height:1.6">${b.premiumStatus === 'unavailable'
-        ? 'The briefing job could not reach these feeds. Allow www.ft.com, rss.nytimes.com, feeds.a.dj.com and www.economist.com in the cloud environment’s network settings, then update the briefing.'
+        ? 'The briefing job could not reach these feeds. Allow www.ft.com, rss.nytimes.com, feeds.content.dowjones.io and www.economist.com in the cloud environment’s network settings, then update the briefing.'
         : b.premiumNews.length ? 'No headlines from these publishers match this filter.' : 'Headlines from these publishers appear after the next briefing update.'}</p>`;
   return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">FT, NYT, WSJ &amp; The Economist</h2><p class="panel-kicker">Free headlines from each publisher’s RSS feed. Articles open on their site, where you sign in with your subscription.</p></div></div><div class="panel-body">${body}</div></div>`;
 }

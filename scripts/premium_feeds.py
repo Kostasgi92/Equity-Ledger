@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 FEEDS = {
     "Financial Times": ["https://www.ft.com/rss/home", "https://www.ft.com/markets?format=rss", "https://www.ft.com/companies?format=rss"],
     "The New York Times": ["https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "https://rss.nytimes.com/services/xml/rss/nyt/YourMoney.xml"],
-    "The Wall Street Journal": ["https://feeds.a.dj.com/rss/RSSMarketsMain.xml", "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml", "https://feeds.a.dj.com/rss/RSSWorldNews.xml"],
+    "The Wall Street Journal": ["https://feeds.content.dowjones.io/public/rss/RSSMarketsMain", "https://feeds.content.dowjones.io/public/rss/RSSWorldNews", "https://feeds.content.dowjones.io/public/rss/RSSUSnews", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"],
     "The Economist": ["https://www.economist.com/finance-and-economics/rss.xml", "https://www.economist.com/business/rss.xml", "https://www.economist.com/leaders/rss.xml"],
 }
 
