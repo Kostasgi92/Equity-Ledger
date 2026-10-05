@@ -871,9 +871,12 @@ async function fetchRadar() {
   let p = res.payload; if (typeof p === 'string') p = JSON.parse(p);
   const list = Array.isArray(p) ? p : (p?.data || p?.result?.data || p?.tickers || []);
   const items = list.map((t) => { try { return parseTicker(t); } catch { return null; } })
-    .filter((t) => t && /^[A-Z0-9]+_USD$/.test(t.instrument || '') && !/^(USDT|USDC|DAI|TUSD|FDUSD|PYUSD|EUR|GBP)_/.test(t.instrument))
-    .sort((a, b) => b.volumeValue - a.volumeValue).slice(0, 25)
-    .map((t) => ({ ...t, symbol: t.instrument.replace(/_USD$/, '') }));
+    // The full list names spot pairs "BTCUSD" (single tickers use "BTC_USD"); skip futures, perpetuals,
+    // other quote currencies and stablecoins.
+    .filter((t) => t && /^[A-Z0-9]+_?USD$/.test(t.instrument || '') && !/PYUSD$/.test(t.instrument))
+    .map((t) => ({ ...t, symbol: t.instrument.replace(/_?USD$/, '') }))
+    .filter((t) => t.symbol && !['USDT', 'USDC', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDE', 'RLUSD', 'USD1', 'EUR', 'GBP'].includes(t.symbol))
+    .sort((a, b) => b.volumeValue - a.volumeValue).slice(0, 25);
   if (!items.length) throw new Error('Crypto.com top market data was incomplete.');
   return items;
 }
