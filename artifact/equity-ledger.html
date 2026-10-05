@@ -1150,7 +1150,7 @@ function briefingData() {
   return {
     generatedAt: d.generatedAt || null,
     market: d.market && typeof d.market === 'object' ? { headline: String(d.market.headline || ''), summary: String(d.market.summary || ''), asOf: d.market.asOf || null,
-      indices: (Array.isArray(d.market.indices) ? d.market.indices : []).filter((i) => i && i.name).slice(0, 16).map((i) => ({ name: String(i.name), level: Number.isFinite(Number(i.level)) && i.level !== null ? Number(i.level) : null, changePct: Number.isFinite(Number(i.changePct)) && i.changePct !== null ? Number(i.changePct) : null })),
+      indices: (Array.isArray(d.market.indices) ? d.market.indices : []).filter((i) => i && i.name && (Number.isFinite(Number(i.level)) && i.level !== null || Number.isFinite(Number(i.changePct)) && i.changePct !== null)).slice(0, 16).map((i) => ({ name: String(i.name), level: Number.isFinite(Number(i.level)) && i.level !== null ? Number(i.level) : null, changePct: Number.isFinite(Number(i.changePct)) && i.changePct !== null ? Number(i.changePct) : null })),
       drivers: (Array.isArray(d.market.drivers) ? d.market.drivers : []).map(String).slice(0, 8) } : null,
     holdingsNews: (Array.isArray(d.holdingsNews) ? d.holdingsNews : []).map((g) => ({ ticker: String(g?.ticker || '').toUpperCase(), name: String(g?.name || ''), items: cleanItems(g?.items) })).filter((g) => g.ticker),
     generalNews: cleanItems(d.generalNews),
