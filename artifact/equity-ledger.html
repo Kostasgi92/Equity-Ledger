@@ -1335,13 +1335,6 @@ function advisorView(s) {
           <div class="range-row"><span class="stat-label">Asset class</span><span class="stat-label">Min %</span><span class="stat-label">Max %</span></div>${rangeRows}
           <div class="form-grid">
             <div class="field"><label for="t-conc">Single-holding limit %</label><input id="t-conc" type="number" min="1" max="100" step="0.5" value="${t.concentrationLimit}" required></div>
-            <div class="field"><label for="t-fee">Annual management fee %</label><input id="t-fee" type="number" min="0" max="100" step="0.01" value="${t.knownAnnualFeePercent ?? ''}"></div>
-            <div class="field"><label for="t-plat-amt">Platform fee</label><input id="t-plat-amt" type="number" min="0" step="0.01" value="${t.knownPlatformCostAmount ?? ''}"></div>
-            <div class="field"><label for="t-plat-cur">Currency / frequency</label><div style="display:flex;gap:6px"><select id="t-plat-cur" aria-label="Platform fee currency"><option value="">—</option>${COST_CURRENCIES.map((c) => `<option ${t.knownPlatformCostCurrency === c ? 'selected' : ''}>${c}</option>`).join('')}</select><select id="t-plat-freq" aria-label="Platform fee frequency"><option value="">—</option>${PLATFORM_COST_FREQUENCIES.map((c) => `<option ${t.knownPlatformCostFrequency === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div></div>
-            <div class="field"><label for="t-deal-amt">Dealing cost per trade</label><input id="t-deal-amt" type="number" min="0" step="0.01" value="${t.knownDealingCostAmount ?? ''}"></div>
-            <div class="field"><label for="t-deal-cur">Dealing currency</label><select id="t-deal-cur"><option value="">—</option>${COST_CURRENCIES.map((c) => `<option ${t.knownDealingCostCurrency === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
-            <div class="field"><label for="t-liq">Cash needed within (days)</label><input id="t-liq" type="number" min="1" max="3650" step="1" value="${t.liquidityHorizonDays ?? ''}"></div>
-            <div class="field"><label for="t-liq-notes">Liquidity notes</label><input id="t-liq-notes" maxlength="500" value="${esc(t.liquidityNotes || '')}"></div>
           </div>
           ${advisorUi.settingsError ? `<div class="form-error" role="alert">${esc(advisorUi.settingsError)}</div>` : ''}
           <div class="form-actions" style="margin-top:0"><button class="button button-secondary" type="submit">${icon('save')}Save settings</button><button class="button button-primary" type="button" data-action="run-review">Run structured review</button></div>
