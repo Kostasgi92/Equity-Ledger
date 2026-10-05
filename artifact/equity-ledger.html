@@ -1129,11 +1129,12 @@ function reviewPanel(rv, canSave) {
    ========================================================================= */
 const BRIEFING_TRIGGER_ID = 'trig_01FQeDcQ7SeoFPzfD44sMhWA';
 const NEWS_SOURCES = [
-  { name: 'Yahoo Finance', domains: ['finance.yahoo.com', 'uk.finance.yahoo.com', 'yahoo.com'] },
-  { name: 'The Wall Street Journal', domains: ['wsj.com'] },
-  { name: 'Financial Times', domains: ['ft.com'] },
-  { name: 'The Economist', domains: ['economist.com'] },
-  { name: 'The New York Times', domains: ['nytimes.com'] },
+  { name: 'Yahoo Finance', domains: ['yahoo.com'] },
+  { name: 'Bloomberg', domains: ['bloomberg.com'] },
+  { name: 'CNBC', domains: ['cnbc.com'] },
+  { name: 'Morningstar UK', domains: ['morningstar.co.uk'] },
+  { name: 'City AM', domains: ['cityam.com'] },
+  { name: 'Forbes', domains: ['forbes.com'] },
 ];
 const sourceFor = (url) => { const h = hostOf(url); return NEWS_SOURCES.find((s) => s.domains.some((d) => h === d || h.endsWith(`.${d}`))) || null; };
 const briefingUi = { doc: null, loaded: false, publisher: 'all', requesting: false, requestedAt: Number(store.get('el.briefingRequestedAt')) || 0, error: null };
@@ -1177,7 +1178,7 @@ function newsView() {
   const b = briefingData();
   const pending = briefingUi.requestedAt && (!b?.generatedAt || Date.parse(b.generatedAt) < briefingUi.requestedAt) && Date.now() - briefingUi.requestedAt < 20 * 60_000;
   const updateBtn = `<button class="button button-primary" data-action="request-briefing" ${briefingUi.requesting || pending ? 'disabled' : ''}>${icon('refresh')}${pending ? 'Updating…' : 'Update briefing'}</button>`;
-  const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, The Wall Street Journal, the Financial Times, The Economist and The New York Times, refreshed every weekday morning and evening (UK time).', updateBtn);
+  const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, with Bloomberg, CNBC, Morningstar UK, City AM and Forbes, refreshed every weekday morning and evening (UK time).', updateBtn);
   const statusBar = `<div class="market-status ${briefingUi.error ? 'warning' : ''}">${icon(briefingUi.error ? 'info' : 'calendar')}<span>${briefingUi.error ? esc(briefingUi.error) : pending ? 'Gathering today’s news and market data. This page updates by itself when the briefing is ready.' : b?.generatedAt ? `Briefing written ${relTime(b.generatedAt)}${b.market?.asOf ? ` for the ${fmtDate(b.market.asOf)} session` : ''}. Next scheduled update at 06:52 or 17:52 UK time on weekdays.` : 'Scheduled updates run at 06:52 and 17:52 UK time on weekdays.'}</span></div>`;
   if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + cryptoSection();
   const m = b.market;
@@ -1204,7 +1205,7 @@ function newsView() {
     ${missing.length ? `<p class="panel-kicker" style="margin-top:10px">${missing.map((h) => esc(h.ticker)).join(', ')} will be included in the next update.</p>` : ''}
     <div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today</p></div></div>
       <div class="panel-body news-list">${b.generalNews.filter(pass).map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>
-    <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; WSJ, FT, The Economist and NYT articles may need a subscription.</p>` +
+    <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; some Bloomberg articles need a subscription.</p>` +
     cryptoSection();
 }
 function cryptoSection() {

@@ -7,17 +7,18 @@ Use the ArtifactData tool (load it with ToolSearch "select:ArtifactData,WebSearc
 ArtifactData get, collection "data/users/me", doc_id "portfolio". Note holdings (ticker, name, assetClass, currency, units, price, dividendYield, theme), liabilities (name, balanceGbp, rate) and targets. Value holdings in GBP using fx rates in the document (GBP=1). Also get doc_id "briefing" in the same collection; remember its `version` if it exists (needed as if_version when you write).
 
 ## 2. Research with WebSearch only (finance.yahoo.com is blocked for WebFetch; do not rely on WebFetch)
-The news thread uses exactly these five sources and no others:
-- Yahoo Finance (primary): finance.yahoo.com, uk.finance.yahoo.com
-- The Wall Street Journal: wsj.com
-- Financial Times: ft.com
-- The Economist: economist.com
-- The New York Times: nytimes.com
-Always pass allowed_domains ["finance.yahoo.com","uk.finance.yahoo.com","wsj.com","ft.com","economist.com","nytimes.com"] on every search. Search Yahoo Finance first for each topic, then the other four. If a search with several domains returns an error, retry with fewer of these five domains at a time (never add other domains). Discard any result from another domain. Set "publisher" to exactly one of: "Yahoo Finance", "The Wall Street Journal", "Financial Times", "The Economist", "The New York Times" (Yahoo Finance syndicated articles keep "Yahoo Finance" as publisher; you may mention the original outlet in the summary).
+The news thread uses exactly these sources and no others:
+- Yahoo Finance (primary, always search it first): finance.yahoo.com, uk.finance.yahoo.com (other *.finance.yahoo.com editions count as Yahoo Finance)
+- Bloomberg: bloomberg.com
+- CNBC: cnbc.com
+- Morningstar UK: morningstar.co.uk
+- City AM: cityam.com
+- Forbes: forbes.com
+Always pass allowed_domains ["finance.yahoo.com","uk.finance.yahoo.com","bloomberg.com","cnbc.com","morningstar.co.uk","cityam.com","forbes.com"] on every search. Never add other domains (WSJ, FT, The Economist, NYT, Reuters, BBC, Guardian and MarketWatch block this crawler and make the search fail). Discard any result from another domain. Prefer Yahoo Finance, Bloomberg and CNBC for news; use Morningstar UK for funds, ETFs and investment trusts; skip Forbes opinion and contributor pieces unless nothing better exists. Set "publisher" to exactly one of: "Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes" (Yahoo Finance syndicated articles keep "Yahoo Finance" as publisher; you may mention the original outlet in the summary).
 
 a) Market overview for today (latest trading session): S&P 500, Nasdaq Composite, Dow Jones, FTSE 100, STOXX 600, Nikkei 225, Gold, Brent crude, US 10-year Treasury yield, GBP/USD, Bitcoin. Get the level and daily % change where the search results state them. Also the 3-5 main drivers (central banks, data releases, earnings, geopolitics).
 b) For each holding except cash (at most 15, largest first): search "<ticker> <name> news" (for UK listings also try the name alone). Keep up to 4 relevant items from the last 7 days.
-c) 6-10 general market headlines a UK-based long-term investor should know today, spread across the five sources where they have recent coverage.
+c) 6-10 general market headlines a UK-based long-term investor should know today, spread across the sources where they have recent coverage.
 
 Never invent a headline, number, date or URL. Every news item must be a result WebSearch actually returned, with its real URL. If a figure is not in the results, leave it null.
 
@@ -41,11 +42,11 @@ Write the document to a local JSON file, then ArtifactData set, collection "data
     "indices": [{"name": "S&P 500", "level": 7773.99, "changePct": 0.66}],
     "drivers": ["<short driver>", "..."]
   },
-  "holdingsNews": [{"ticker": "VWRL", "name": "...", "items": [{"title": "...", "publisher": "Financial Times", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}]}],
+  "holdingsNews": [{"ticker": "VWRL", "name": "...", "items": [{"title": "...", "publisher": "Bloomberg", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}]}],
   "generalNews": [{"title": "...", "publisher": "...", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}],
   "focusAreas": [{"title": "...", "rationale": "...", "type": "portfolio|market|research", "relatedTickers": []}],
   "riskNote": "This briefing is educational information, not regulated personal advice. Check suitability, costs and tax before acting.",
-  "sources": ["Yahoo Finance", "The Wall Street Journal", "Financial Times", "The Economist", "The New York Times"]
+  "sources": ["Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes"]
 }
 
 Keep the whole document under 150 KB. Include holdings with no news found as {"ticker","name","items":[]}. After writing, reply with one line saying how many items you wrote.
