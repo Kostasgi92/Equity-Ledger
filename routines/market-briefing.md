@@ -7,8 +7,13 @@ Use the ArtifactData tool (load it with ToolSearch "select:ArtifactData,WebSearc
 ArtifactData get, collection "data/users/me", doc_id "portfolio". Note holdings (ticker, name, assetClass, currency, units, price, dividendYield, theme), liabilities (name, balanceGbp, rate) and targets. Value holdings in GBP using fx rates in the document (GBP=1). Also get doc_id "briefing" in the same collection; remember its `version` if it exists (needed as if_version when you write).
 
 ## 2. Research with WebSearch only (finance.yahoo.com is blocked for WebFetch; do not rely on WebFetch)
-Primary source: Yahoo Finance. Also use high-quality outlets: Reuters, Bloomberg, Financial Times, The Wall Street Journal, CNBC, The Economist, MarketWatch, Barron's, BBC Business, The Guardian Business.
-Use allowed_domains on searches, for example ["finance.yahoo.com","uk.finance.yahoo.com","reuters.com","bloomberg.com","ft.com","wsj.com","cnbc.com","economist.com","marketwatch.com","barrons.com","bbc.co.uk","theguardian.com"].
+The news thread uses exactly these five sources and no others:
+- Yahoo Finance (primary): finance.yahoo.com, uk.finance.yahoo.com
+- The Wall Street Journal: wsj.com
+- Financial Times: ft.com
+- The Economist: economist.com
+- The New York Times: nytimes.com
+Always pass allowed_domains ["finance.yahoo.com","uk.finance.yahoo.com","wsj.com","ft.com","economist.com","nytimes.com"] on every search. Search Yahoo Finance first for each topic, then the other four. Discard any result from another domain. Set "publisher" to exactly one of: "Yahoo Finance", "The Wall Street Journal", "Financial Times", "The Economist", "The New York Times" (Yahoo Finance syndicated articles keep "Yahoo Finance" as publisher; you may mention the original outlet in the summary).
 
 a) Market overview for today (latest trading session): S&P 500, Nasdaq Composite, Dow Jones, FTSE 100, STOXX 600, Nikkei 225, Gold, Brent crude, US 10-year Treasury yield, GBP/USD, Bitcoin. Get the level and daily % change where the search results state them. Also the 3-5 main drivers (central banks, data releases, earnings, geopolitics).
 b) For each holding except cash (at most 15, largest first): search "<ticker> <name> news" (for UK listings also try the name alone). Keep up to 4 relevant items from the last 7 days.
@@ -36,11 +41,11 @@ Write the document to a local JSON file, then ArtifactData set, collection "data
     "indices": [{"name": "S&P 500", "level": 7773.99, "changePct": 0.66}],
     "drivers": ["<short driver>", "..."]
   },
-  "holdingsNews": [{"ticker": "VWRL", "name": "...", "items": [{"title": "...", "publisher": "Reuters", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}]}],
+  "holdingsNews": [{"ticker": "VWRL", "name": "...", "items": [{"title": "...", "publisher": "Financial Times", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}]}],
   "generalNews": [{"title": "...", "publisher": "...", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}],
   "focusAreas": [{"title": "...", "rationale": "...", "type": "portfolio|market|research", "relatedTickers": []}],
   "riskNote": "This briefing is educational information, not regulated personal advice. Check suitability, costs and tax before acting.",
-  "sources": ["Yahoo Finance", "Reuters", "..."]
+  "sources": ["Yahoo Finance", "The Wall Street Journal", "Financial Times", "The Economist", "The New York Times"]
 }
 
 Keep the whole document under 150 KB. Include holdings with no news found as {"ticker","name","items":[]}. After writing, reply with one line saying how many items you wrote.

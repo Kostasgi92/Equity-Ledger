@@ -1128,14 +1128,21 @@ function reviewPanel(rv, canSave) {
    News & market briefing (written by the scheduled briefing job)
    ========================================================================= */
 const BRIEFING_TRIGGER_ID = 'trig_01FQeDcQ7SeoFPzfD44sMhWA';
-const PREFERRED_PUBLISHERS = ['Yahoo Finance', 'Reuters', 'Bloomberg', 'Financial Times', 'The Wall Street Journal', 'CNBC', 'The Economist', 'MarketWatch', "Barron's", 'BBC', 'The Guardian'];
+const NEWS_SOURCES = [
+  { name: 'Yahoo Finance', domains: ['finance.yahoo.com', 'uk.finance.yahoo.com', 'yahoo.com'] },
+  { name: 'The Wall Street Journal', domains: ['wsj.com'] },
+  { name: 'Financial Times', domains: ['ft.com'] },
+  { name: 'The Economist', domains: ['economist.com'] },
+  { name: 'The New York Times', domains: ['nytimes.com'] },
+];
+const sourceFor = (url) => { const h = hostOf(url); return NEWS_SOURCES.find((s) => s.domains.some((d) => h === d || h.endsWith(`.${d}`))) || null; };
 const briefingUi = { doc: null, loaded: false, publisher: 'all', requesting: false, requestedAt: Number(store.get('el.briefingRequestedAt')) || 0, error: null };
 const safeUrl = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && !x.username && !x.password ? x.toString() : null; } catch { return null; } };
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
-const isPreferred = (p) => PREFERRED_PUBLISHERS.some((n) => (p || '').toLowerCase().includes(n.toLowerCase().replace(/^the /, '')));
 function cleanItems(items) {
-  return (Array.isArray(items) ? items : []).map((i) => ({ title: String(i?.title || '').slice(0, 300), publisher: String(i?.publisher || '').slice(0, 80) || hostOf(i?.url), url: safeUrl(i?.url), publishedAt: typeof i?.publishedAt === 'string' ? i.publishedAt : null, summary: String(i?.summary || '').slice(0, 500) }))
-    .filter((i) => i.title && i.url);
+  return (Array.isArray(items) ? items : []).map((i) => { const url = safeUrl(i?.url); const src = url && sourceFor(url);
+    return { title: String(i?.title || '').slice(0, 300), publisher: src ? src.name : '', url, publishedAt: typeof i?.publishedAt === 'string' ? i.publishedAt : null, summary: String(i?.summary || '').slice(0, 500) }; })
+    .filter((i) => i.title && i.url && i.publisher);
 }
 function briefingData() {
   const d = briefingUi.doc; if (!d) return null;
@@ -1164,22 +1171,21 @@ async function requestBriefing() {
   } finally { briefingUi.requesting = false; render(); }
 }
 const newsItem = (i, ticker = '') => `<a class="news-item" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">
-  <span class="news-meta"><b class="${isPreferred(i.publisher) ? 'pub-preferred' : ''}">${esc(i.publisher)}</b>${i.publishedAt ? ` · ${fmtDate(i.publishedAt)}` : ''}${ticker ? ` · <span class="tag">${esc(ticker)}</span>` : ''}</span>
+  <span class="news-meta"><b class="pub-preferred">${esc(i.publisher)}</b>${i.publishedAt ? ` · ${fmtDate(i.publishedAt)}` : ''}${ticker ? ` · <span class="tag">${esc(ticker)}</span>` : ''}</span>
   <strong>${esc(i.title)}</strong>${i.summary ? `<p>${esc(i.summary)}</p>` : ''}</a>`;
 function newsView() {
   const b = briefingData();
   const pending = briefingUi.requestedAt && (!b?.generatedAt || Date.parse(b.generatedAt) < briefingUi.requestedAt) && Date.now() - briefingUi.requestedAt < 20 * 60_000;
   const updateBtn = `<button class="button button-primary" data-action="request-briefing" ${briefingUi.requesting || pending ? 'disabled' : ''}>${icon('refresh')}${pending ? 'Updating…' : 'Update briefing'}</button>`;
-  const heading = pageHeading('News', 'The market, through your portfolio.', 'A briefing gathered from Yahoo Finance and other leading financial publishers, refreshed every weekday morning and evening (UK time).', updateBtn);
+  const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, The Wall Street Journal, the Financial Times, The Economist and The New York Times, refreshed every weekday morning and evening (UK time).', updateBtn);
   const statusBar = `<div class="market-status ${briefingUi.error ? 'warning' : ''}">${icon(briefingUi.error ? 'info' : 'calendar')}<span>${briefingUi.error ? esc(briefingUi.error) : pending ? 'Gathering today’s news and market data. This page updates by itself when the briefing is ready.' : b?.generatedAt ? `Briefing written ${relTime(b.generatedAt)}${b.market?.asOf ? ` for the ${fmtDate(b.market.asOf)} session` : ''}. Next scheduled update at 06:52 or 17:52 UK time on weekdays.` : 'Scheduled updates run at 06:52 and 17:52 UK time on weekdays.'}</span></div>`;
   if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + cryptoSection();
   const m = b.market;
   const held = new Map(state.holdings.map((h) => [h.ticker.toUpperCase(), h]));
   const covered = new Set(b.holdingsNews.map((g) => g.ticker));
   const missing = state.holdings.filter((h) => h.assetClass !== 'cash' && !covered.has(h.ticker.toUpperCase()));
-  const pubs = [...new Set([...b.holdingsNews.flatMap((g) => g.items), ...b.generalNews].map((i) => i.publisher))].sort();
   const pf = briefingUi.publisher;
-  const pass = (i) => pf === 'all' || (pf === 'preferred' ? isPreferred(i.publisher) : i.publisher === pf);
+  const pass = (i) => pf === 'all' || i.publisher === pf;
   const groups = b.holdingsNews.filter((g) => held.has(g.ticker) || !state.holdings.length).map((g) => ({ ...g, items: g.items.filter(pass) }));
   const typeLabel = { portfolio: 'Your portfolio', market: 'Market', research: 'To research' };
   return heading + statusBar +
@@ -1192,13 +1198,13 @@ function newsView() {
       <div class="panel-body"><div class="focus-grid">${b.focusAreas.map((f, n) => `<div class="focus-card"><div class="focus-top"><span class="focus-n">${n + 1}</span>${badge(f.type === 'portfolio' ? 'watch' : f.type === 'market' ? 'information' : 'live', typeLabel[f.type])}</div><h3>${esc(f.title)}</h3><p>${esc(f.rationale)}</p>${f.relatedTickers.length ? `<div class="prompt-chips" style="margin-top:2px">${f.relatedTickers.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}</div>`).join('')}</div>
       <p class="risk-line">${esc(b.riskNote)}</p></div></div>` : '') +
     `<div class="section-heading"><h2>News for your holdings</h2>
-      <div class="prompt-chips" style="margin:0" role="group" aria-label="Filter by publisher">${[['all', 'All'], ['preferred', 'Leading publishers'], ...pubs.map((p) => [p, p])].map(([k, l]) => `<button class="chip ${pf === k ? 'chip-on' : ''}" data-action="news-publisher" data-pub="${esc(k)}" aria-pressed="${pf === k}">${esc(l)}</button>`).join('')}</div></div>
+      <div class="prompt-chips" style="margin:0" role="group" aria-label="Filter by publisher">${[['all', 'All sources'], ...NEWS_SOURCES.map((x) => [x.name, x.name])].map(([k, l]) => `<button class="chip ${pf === k ? 'chip-on' : ''}" data-action="news-publisher" data-pub="${esc(k)}" aria-pressed="${pf === k}">${esc(l)}</button>`).join('')}</div></div>
     ${groups.length ? `<div class="news-groups">${groups.map((g) => { const h = held.get(g.ticker); return `<div class="panel"><div class="panel-header"><div class="ticker-cell"><span class="ticker-mark">${esc(g.ticker.slice(0, 4))}</span><div><strong>${esc(h?.name || g.name || g.ticker)}</strong><span>${esc(g.ticker)}${h ? ` · ${ASSET_CLASSES[h.assetClass] || ''}` : ''}</span></div></div></div><div class="panel-body news-list">${g.items.length ? g.items.map((i) => newsItem(i)).join('') : `<p class="panel-kicker">${pf === 'all' ? 'No notable news in the last week.' : 'Nothing from this publisher.'}</p>`}</div></div>`; }).join('')}</div>`
       : `<div class="panel">${emptyBlock('holdings', state.holdings.length ? 'No holding news yet' : 'Add holdings to get their news', state.holdings.length ? 'News for your holdings appears after the next briefing update.' : 'Each briefing searches news for every holding in your ledger. Add your investments on the Holdings page.', state.holdings.length ? '' : '<a class="button button-secondary" href="#holdings">Go to holdings</a>')}</div>`}
     ${missing.length ? `<p class="panel-kicker" style="margin-top:10px">${missing.map((h) => esc(h.ticker)).join(', ')} will be included in the next update.</p>` : ''}
     <div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today</p></div></div>
       <div class="panel-body news-list">${b.generalNews.filter(pass).map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>
-    ${b.sources.length ? `<p class="panel-kicker" style="margin-top:10px">Sources: ${b.sources.map(esc).join(', ')}. Links open the publisher’s site; some articles need a subscription.</p>` : ''}` +
+    <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; WSJ, FT, The Economist and NYT articles may need a subscription.</p>` +
     cryptoSection();
 }
 function cryptoSection() {
