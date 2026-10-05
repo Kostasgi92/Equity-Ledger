@@ -13,11 +13,11 @@ The news thread uses exactly these five sources and no others:
 - Financial Times: ft.com
 - The Economist: economist.com
 - The New York Times: nytimes.com
-Always pass allowed_domains ["finance.yahoo.com","uk.finance.yahoo.com","wsj.com","ft.com","economist.com","nytimes.com"] on every search. Search Yahoo Finance first for each topic, then the other four. Discard any result from another domain. Set "publisher" to exactly one of: "Yahoo Finance", "The Wall Street Journal", "Financial Times", "The Economist", "The New York Times" (Yahoo Finance syndicated articles keep "Yahoo Finance" as publisher; you may mention the original outlet in the summary).
+Always pass allowed_domains ["finance.yahoo.com","uk.finance.yahoo.com","wsj.com","ft.com","economist.com","nytimes.com"] on every search. Search Yahoo Finance first for each topic, then the other four. If a search with several domains returns an error, retry with fewer of these five domains at a time (never add other domains). Discard any result from another domain. Set "publisher" to exactly one of: "Yahoo Finance", "The Wall Street Journal", "Financial Times", "The Economist", "The New York Times" (Yahoo Finance syndicated articles keep "Yahoo Finance" as publisher; you may mention the original outlet in the summary).
 
 a) Market overview for today (latest trading session): S&P 500, Nasdaq Composite, Dow Jones, FTSE 100, STOXX 600, Nikkei 225, Gold, Brent crude, US 10-year Treasury yield, GBP/USD, Bitcoin. Get the level and daily % change where the search results state them. Also the 3-5 main drivers (central banks, data releases, earnings, geopolitics).
 b) For each holding except cash (at most 15, largest first): search "<ticker> <name> news" (for UK listings also try the name alone). Keep up to 4 relevant items from the last 7 days.
-c) 6-10 general market headlines a UK-based long-term investor should know today.
+c) 6-10 general market headlines a UK-based long-term investor should know today, spread across the five sources where they have recent coverage.
 
 Never invent a headline, number, date or URL. Every news item must be a result WebSearch actually returned, with its real URL. If a figure is not in the results, leave it null.
 
@@ -33,7 +33,7 @@ Write 3-5 focus areas that combine the market picture with this portfolio. Rules
 Write the document to a local JSON file, then ArtifactData set, collection "data/users/me", doc_id "briefing", file_path pointing to it, with if_version if the document existed. Shape:
 
 {
-  "generatedAt": "<ISO timestamp now>",
+  "generatedAt": "<the output of `date -u +%Y-%m-%dT%H:%M:%SZ`, run it in Bash>",
   "market": {
     "headline": "<one sentence, max 120 chars>",
     "summary": "<3-5 sentences>",
