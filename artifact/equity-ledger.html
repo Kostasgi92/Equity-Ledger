@@ -199,6 +199,30 @@ tr.data-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent
 .chip:hover { border-color: var(--accent); }
 .flag { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .flag:last-child { border-bottom: 0; } .flag strong { font-size: 13px; } .flag p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.lede { margin: 0; font: 500 17px/1.6 var(--font-serif); color: var(--fg); max-width: 72ch; }
+.index-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.index-tile { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); min-width: 0; }
+.index-tile span { color: var(--muted); font: 500 10px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+.index-tile strong { font-size: 17px; letter-spacing: -.02em; } .index-tile em { font: 500 11px var(--font-mono); font-style: normal; }
+.focus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.focus-card { display: grid; align-content: start; gap: 8px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); min-width: 0; }
+.focus-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.focus-n { font: 600 22px/1 var(--font-serif); color: var(--accent); }
+.focus-card h3 { margin: 0; font: 600 18px/1.25 var(--font-serif); color: var(--primary); text-wrap: balance; }
+.focus-card p { margin: 0; color: var(--fg); font-size: 12.5px; line-height: 1.6; }
+.risk-line { margin: 14px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.news-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.news-list { display: grid; gap: 0; }
+.news-item { display: grid; gap: 5px; padding: 12px 0; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--fg); }
+.news-item:last-child { border-bottom: 0; }
+.news-item strong { font-size: 13.5px; line-height: 1.4; color: var(--fg); }
+.news-item:hover strong { color: var(--primary); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.news-item p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.news-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--muted); font: 500 10px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+.news-meta b { font-weight: 500; } .news-meta b.pub-preferred { color: var(--primary); }
+.chip-on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.crypto-panel > summary { list-style: none; cursor: pointer; } .crypto-panel > summary::-webkit-details-marker { display: none; }
+.crypto-panel[open] > summary { border-bottom: 1px solid var(--border); padding-bottom: 16px; }
 .range-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px; align-items: center; }
 .range-row span { font-size: 12px; }
 .plain-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 12px; line-height: 1.55; color: var(--fg); }
@@ -815,7 +839,7 @@ function mcpErrorText(e) {
 /* =========================================================================
    Persistence: one private document per person, plus saved reviews
    ========================================================================= */
-const caps = { db: null, user: null, sample: null, mcp: null, uid: null };
+const caps = { db: null, user: null, sample: null, mcp: null, remote: null, uid: null };
 let state = null; let snapshots = []; let phase = 'loading'; let saveTimer = null; let saving = Promise.resolve(); let lastSavedJson = '';
 const emptyState = () => ({
   version: 1, holdings: [], accounts: [], liabilities: [], schedules: [], occurrences: [], alerts: [], activity: [],
@@ -858,7 +882,7 @@ const NAV = [
   { id: 'liabilities', label: 'Liabilities', icon: 'liabilities' },
   { id: 'recurring', label: 'Recurring', short: 'Repeat', icon: 'recurring' },
   { id: 'advisor', label: 'Advisor', icon: 'advisor' },
-  { id: 'news', label: 'Markets', icon: 'news' },
+  { id: 'news', label: 'News', icon: 'news' },
 ];
 const route = () => { const r = (location.hash || '').replace('#', ''); return NAV.some((n) => n.id === r) ? r : 'overview'; };
 let lastRoute = null;
@@ -1100,26 +1124,95 @@ function reviewPanel(rv, canSave) {
     </div></div>`;
 }
 
+/* =========================================================================
+   News & market briefing (written by the scheduled briefing job)
+   ========================================================================= */
+const BRIEFING_TRIGGER_ID = 'trig_01FQeDcQ7SeoFPzfD44sMhWA';
+const PREFERRED_PUBLISHERS = ['Yahoo Finance', 'Reuters', 'Bloomberg', 'Financial Times', 'The Wall Street Journal', 'CNBC', 'The Economist', 'MarketWatch', "Barron's", 'BBC', 'The Guardian'];
+const briefingUi = { doc: null, loaded: false, publisher: 'all', requesting: false, requestedAt: Number(store.get('el.briefingRequestedAt')) || 0, error: null };
+const safeUrl = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && !x.username && !x.password ? x.toString() : null; } catch { return null; } };
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+const isPreferred = (p) => PREFERRED_PUBLISHERS.some((n) => (p || '').toLowerCase().includes(n.toLowerCase().replace(/^the /, '')));
+function cleanItems(items) {
+  return (Array.isArray(items) ? items : []).map((i) => ({ title: String(i?.title || '').slice(0, 300), publisher: String(i?.publisher || '').slice(0, 80) || hostOf(i?.url), url: safeUrl(i?.url), publishedAt: typeof i?.publishedAt === 'string' ? i.publishedAt : null, summary: String(i?.summary || '').slice(0, 500) }))
+    .filter((i) => i.title && i.url);
+}
+function briefingData() {
+  const d = briefingUi.doc; if (!d) return null;
+  return {
+    generatedAt: d.generatedAt || null,
+    market: d.market && typeof d.market === 'object' ? { headline: String(d.market.headline || ''), summary: String(d.market.summary || ''), asOf: d.market.asOf || null,
+      indices: (Array.isArray(d.market.indices) ? d.market.indices : []).filter((i) => i && i.name).slice(0, 16).map((i) => ({ name: String(i.name), level: Number.isFinite(Number(i.level)) && i.level !== null ? Number(i.level) : null, changePct: Number.isFinite(Number(i.changePct)) && i.changePct !== null ? Number(i.changePct) : null })),
+      drivers: (Array.isArray(d.market.drivers) ? d.market.drivers : []).map(String).slice(0, 8) } : null,
+    holdingsNews: (Array.isArray(d.holdingsNews) ? d.holdingsNews : []).map((g) => ({ ticker: String(g?.ticker || '').toUpperCase(), name: String(g?.name || ''), items: cleanItems(g?.items) })).filter((g) => g.ticker),
+    generalNews: cleanItems(d.generalNews),
+    focusAreas: (Array.isArray(d.focusAreas) ? d.focusAreas : []).map((f) => ({ title: String(f?.title || ''), rationale: String(f?.rationale || ''), type: ['portfolio', 'market', 'research'].includes(f?.type) ? f.type : 'research', relatedTickers: Array.isArray(f?.relatedTickers) ? f.relatedTickers.map(String) : [] }))
+      .filter((f) => f.title && !containsProhibitedInstrument(`${f.title} ${f.rationale}`) && !/\bprice\s+target\b|\bwill\s+(?:rise|fall|double|surge|crash)\b|\bguaranteed?\b/i.test(`${f.title} ${f.rationale}`)).slice(0, 6),
+    riskNote: String(d.riskNote || 'This briefing is educational information, not regulated personal advice.'),
+    sources: Array.isArray(d.sources) ? d.sources.map(String).slice(0, 20) : [],
+  };
+}
+async function requestBriefing() {
+  if (!caps.remote) { toast('On-demand updates need the Claude Code Remote connector. The briefing still updates on schedule.'); return; }
+  briefingUi.requesting = true; briefingUi.error = null; render();
+  try {
+    await caps.remote.callTool('Claude Code Remote', 'fire_trigger', { trigger_id: BRIEFING_TRIGGER_ID });
+    briefingUi.requestedAt = Date.now(); store.set('el.briefingRequestedAt', String(briefingUi.requestedAt));
+    toast('Briefing update started. It usually takes a few minutes.');
+  } catch (e) {
+    briefingUi.error = e?.code === 'not_granted' ? 'Updating on demand was not allowed. The briefing still updates on schedule.' : e?.code === 'server_not_connected' ? 'Connect Claude Code Remote in your claude.ai connectors to update on demand.' : 'The update could not be started. Try again in a few minutes.';
+  } finally { briefingUi.requesting = false; render(); }
+}
+const newsItem = (i, ticker = '') => `<a class="news-item" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">
+  <span class="news-meta"><b class="${isPreferred(i.publisher) ? 'pub-preferred' : ''}">${esc(i.publisher)}</b>${i.publishedAt ? ` · ${fmtDate(i.publishedAt)}` : ''}${ticker ? ` · <span class="tag">${esc(ticker)}</span>` : ''}</span>
+  <strong>${esc(i.title)}</strong>${i.summary ? `<p>${esc(i.summary)}</p>` : ''}</a>`;
 function newsView() {
+  const b = briefingData();
+  const pending = briefingUi.requestedAt && (!b?.generatedAt || Date.parse(b.generatedAt) < briefingUi.requestedAt) && Date.now() - briefingUi.requestedAt < 20 * 60_000;
+  const updateBtn = `<button class="button button-primary" data-action="request-briefing" ${briefingUi.requesting || pending ? 'disabled' : ''}>${icon('refresh')}${pending ? 'Updating…' : 'Update briefing'}</button>`;
+  const heading = pageHeading('News', 'The market, through your portfolio.', 'A briefing gathered from Yahoo Finance and other leading financial publishers, refreshed every weekday morning and evening (UK time).', updateBtn);
+  const statusBar = `<div class="market-status ${briefingUi.error ? 'warning' : ''}">${icon(briefingUi.error ? 'info' : 'calendar')}<span>${briefingUi.error ? esc(briefingUi.error) : pending ? 'Gathering today’s news and market data. This page updates by itself when the briefing is ready.' : b?.generatedAt ? `Briefing written ${relTime(b.generatedAt)}${b.market?.asOf ? ` for the ${fmtDate(b.market.asOf)} session` : ''}. Next scheduled update at 06:52 or 17:52 UK time on weekdays.` : 'Scheduled updates run at 06:52 and 17:52 UK time on weekdays.'}</span></div>`;
+  if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + cryptoSection();
+  const m = b.market;
+  const held = new Map(state.holdings.map((h) => [h.ticker.toUpperCase(), h]));
+  const covered = new Set(b.holdingsNews.map((g) => g.ticker));
+  const missing = state.holdings.filter((h) => h.assetClass !== 'cash' && !covered.has(h.ticker.toUpperCase()));
+  const pubs = [...new Set([...b.holdingsNews.flatMap((g) => g.items), ...b.generalNews].map((i) => i.publisher))].sort();
+  const pf = briefingUi.publisher;
+  const pass = (i) => pf === 'all' || (pf === 'preferred' ? isPreferred(i.publisher) : i.publisher === pf);
+  const groups = b.holdingsNews.filter((g) => held.has(g.ticker) || !state.holdings.length).map((g) => ({ ...g, items: g.items.filter(pass) }));
+  const typeLabel = { portfolio: 'Your portfolio', market: 'Market', research: 'To research' };
+  return heading + statusBar +
+    (m ? `<div class="panel"><div class="panel-header"><div><div class="eyebrow">Market overview${m.asOf ? ` · ${fmtDate(m.asOf)}` : ''}</div><h2 class="panel-title" style="margin-top:6px;font-size:26px;line-height:1.15">${esc(m.headline)}</h2></div></div>
+      <div class="panel-body stack"><p class="lede">${esc(m.summary)}</p>
+        ${m.indices.length ? `<div class="index-grid">${m.indices.map((i) => `<div class="index-tile"><span>${esc(i.name)}</span><strong class="num">${i.level === null ? '—' : new Intl.NumberFormat('en-GB', { maximumFractionDigits: i.level < 20 ? 4 : 2 }).format(i.level)}</strong><em class="num ${i.changePct > 0 ? 'positive' : i.changePct < 0 ? 'negative' : ''}">${i.changePct === null ? 'n/a' : signedPct(i.changePct)}</em></div>`).join('')}</div>` : ''}
+        ${m.drivers.length ? `<div><div class="stat-label" style="margin-bottom:8px">What moved markets</div><ul class="plain-list">${m.drivers.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></div>` : ''}
+      </div></div>` : '') +
+    (b.focusAreas.length ? `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Areas to focus</h2><p class="panel-kicker">Where to look next, given today’s market and your ledger</p></div></div>
+      <div class="panel-body"><div class="focus-grid">${b.focusAreas.map((f, n) => `<div class="focus-card"><div class="focus-top"><span class="focus-n">${n + 1}</span>${badge(f.type === 'portfolio' ? 'watch' : f.type === 'market' ? 'information' : 'live', typeLabel[f.type])}</div><h3>${esc(f.title)}</h3><p>${esc(f.rationale)}</p>${f.relatedTickers.length ? `<div class="prompt-chips" style="margin-top:2px">${f.relatedTickers.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}</div>`).join('')}</div>
+      <p class="risk-line">${esc(b.riskNote)}</p></div></div>` : '') +
+    `<div class="section-heading"><h2>News for your holdings</h2>
+      <div class="prompt-chips" style="margin:0" role="group" aria-label="Filter by publisher">${[['all', 'All'], ['preferred', 'Leading publishers'], ...pubs.map((p) => [p, p])].map(([k, l]) => `<button class="chip ${pf === k ? 'chip-on' : ''}" data-action="news-publisher" data-pub="${esc(k)}" aria-pressed="${pf === k}">${esc(l)}</button>`).join('')}</div></div>
+    ${groups.length ? `<div class="news-groups">${groups.map((g) => { const h = held.get(g.ticker); return `<div class="panel"><div class="panel-header"><div class="ticker-cell"><span class="ticker-mark">${esc(g.ticker.slice(0, 4))}</span><div><strong>${esc(h?.name || g.name || g.ticker)}</strong><span>${esc(g.ticker)}${h ? ` · ${ASSET_CLASSES[h.assetClass] || ''}` : ''}</span></div></div></div><div class="panel-body news-list">${g.items.length ? g.items.map((i) => newsItem(i)).join('') : `<p class="panel-kicker">${pf === 'all' ? 'No notable news in the last week.' : 'Nothing from this publisher.'}</p>`}</div></div>`; }).join('')}</div>`
+      : `<div class="panel">${emptyBlock('holdings', state.holdings.length ? 'No holding news yet' : 'Add holdings to get their news', state.holdings.length ? 'News for your holdings appears after the next briefing update.' : 'Each briefing searches news for every holding in your ledger. Add your investments on the Holdings page.', state.holdings.length ? '' : '<a class="button button-secondary" href="#holdings">Go to holdings</a>')}</div>`}
+    ${missing.length ? `<p class="panel-kicker" style="margin-top:10px">${missing.map((h) => esc(h.ticker)).join(', ')} will be included in the next update.</p>` : ''}
+    <div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today</p></div></div>
+      <div class="panel-body news-list">${b.generalNews.filter(pass).map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>
+    ${b.sources.length ? `<p class="panel-kicker" style="margin-top:10px">Sources: ${b.sources.map(esc).join(', ')}. Links open the publisher’s site; some articles need a subscription.</p>` : ''}` +
+    cryptoSection();
+}
+function cryptoSection() {
   const ci = cryptoIntelligence();
   const radar = market.radar || [];
   const held = new Set(state.holdings.filter((h) => h.assetClass === 'crypto').map((h) => h.ticker.toUpperCase()));
   const body = !caps.mcp
-    ? emptyBlock('coins', 'Live markets are not available here', 'Open this page in claude.ai with the Crypto.com connector to see the crypto market radar.')
+    ? emptyBlock('coins', 'Live crypto markets are not available here', 'Open this page in claude.ai with the Crypto.com connector to see the crypto market radar.')
     : !radar.length
-      ? emptyBlock('coins', market.refreshing ? 'Loading market radar…' : 'Market radar is waiting', market.radarError ? esc(market.radarError) : 'Load the 25 most traded crypto markets from Crypto.com. The first load asks you to allow the connector.', `<button class="button button-primary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Load market radar</button>`)
+      ? emptyBlock('coins', market.refreshing ? 'Loading market radar…' : 'Crypto radar is waiting', market.radarError ? esc(market.radarError) : 'Load the 25 most traded crypto markets from Crypto.com.', `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Load crypto radar</button>`)
       : `<div class="table-wrap"><table style="min-width:560px"><thead><tr><th>#</th><th>Market</th><th class="r">Last (USD)</th><th class="r">24h</th><th class="r">24h volume (USD)</th><th></th></tr></thead><tbody>
         ${radar.map((r, i) => `<tr class="data-row"><td class="mono">${i + 1}</td><td><div class="ticker-cell"><span class="ticker-mark">${esc(r.symbol.slice(0, 4))}</span><div><strong>${esc(r.symbol)}</strong><span>${esc(r.instrument)}</span></div></div></td><td class="r mono">${money(r.price, 'USD', r.price < 10 ? 4 : 2)}</td><td class="r mono ${r.dayChange > 0 ? 'positive' : r.dayChange < 0 ? 'negative' : ''}">${signedPct(r.dayChange)}</td><td class="r mono">${new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 }).format(r.volumeValue)}</td><td>${held.has(r.symbol) ? '<span class="tag">You hold</span>' : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
-  return pageHeading('Markets', 'Context, not signals.', 'Sourced crypto market data from Crypto.com. Treat sentiment as background for long-term decisions, never as a trading signal.',
-    caps.mcp ? `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh'}</button>` : '') +
-    `<div class="overview-grid" style="margin-bottom:16px">
-      <div class="stat-card dark"><div class="stat-label">Crypto sentiment</div><div class="stat-value" style="text-transform:capitalize">${ci.sentiment}</div><div class="stat-meta">${ci.status === 'unavailable' ? 'Not inferred without data' : `Derived from Crypto.com · ${relTime(ci.timestamp)}`}</div></div>
-      <div class="stat-card"><div class="stat-label">Bitcoin, 24h</div><div class="stat-value ${ci.btcChange24h > 0 ? 'positive' : ci.btcChange24h < 0 ? 'negative' : ''}">${ci.btcChange24h !== undefined ? signedPct(ci.btcChange24h) : '—'}</div><div class="stat-meta">BTC/USD</div></div>
-      <div class="stat-card"><div class="stat-label">Market breadth</div><div class="stat-value">${ci.breadth !== undefined ? `${ci.breadth}%` : '—'}</div><div class="stat-meta">Top 25 markets up on the day</div></div>
-    </div>
-    <div class="panel"><div class="panel-header"><div><h2 class="panel-title">Crypto market radar</h2><p class="panel-kicker">25 most traded USD markets on Crypto.com</p></div></div>${body}</div>
-    <div class="market-status" style="margin-top:16px">${icon('info')}<span>Headline news from Bloomberg, the FT and other publishers is not available in this version, because the page can only reach connected sources.</span></div>`;
+  return `<details class="panel crypto-panel" style="margin-top:16px" ${store.get('el.cryptoOpen') === '1' ? 'open' : ''}><summary class="panel-header"><div><h2 class="panel-title">Crypto market radar</h2><p class="panel-kicker">Sentiment ${esc(ci.sentiment)}${ci.btcChange24h !== undefined ? ` · BTC ${signedPct(ci.btcChange24h)} · ${ci.breadth}% of top 25 up` : ''} · live from Crypto.com</p></div>${caps.mcp && radar.length ? `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Refresh</button>` : ''}</summary>${body}</details>`;
 }
 
 /* =========================================================================
@@ -1360,7 +1453,7 @@ document.addEventListener('click', async (e) => {
   const find = (arr) => arr.find((x) => x.id === id);
   switch (action) {
     case 'close-modal': closeModal(); break;
-    case 'refresh': refreshMarket({ manual: true }); break;
+    case 'refresh': e.preventDefault(); refreshMarket({ manual: true }); break;
     case 'retry-price': { const h = find(state.holdings); if (!h) break; market.lastRefreshAt = 0; await refreshMarket({ manual: true }); break; }
     case 'add-holding': e.preventDefault(); if (route() !== 'holdings') location.hash = 'holdings'; setTimeout(() => holdingForm(null), 0); break;
     case 'edit-holding': holdingForm(find(state.holdings)); break;
@@ -1397,10 +1490,13 @@ document.addEventListener('click', async (e) => {
     case 'view-snapshot': { const sn = find(snapshots); if (sn) { advisorUi.review = sn.review; render(); document.querySelector('.panel-title')?.scrollIntoView?.(); } break; }
     case 'delete-snapshot': confirmModal('Delete this saved review?', 'The snapshot will be removed permanently.', 'Delete review', async () => {
       try { await reviewsCol().doc(id).delete(); snapshots = snapshots.filter((x) => x.id !== id); render(); toast('Saved review deleted.'); } catch (err) { handleDbError(err, 'The review could not be deleted.'); } }); break;
+    case 'request-briefing': requestBriefing(); break;
+    case 'news-publisher': briefingUi.publisher = el.dataset.pub; render(); break;
     case 'load-examples': loadExamples(); break;
     case 'clear-examples': clearExamples(); break;
   }
 });
+document.addEventListener('toggle', (e) => { if (e.target.classList?.contains('crypto-panel')) store.set('el.cryptoOpen', e.target.open ? '1' : '0'); }, true);
 function afterRender() { /* hook for per-view wiring; forms use delegated listeners */ }
 
 let toastTimer = null;
@@ -1416,7 +1512,7 @@ function toast(message) {
 (async function boot() {
   const use = (n) => (window.claude?.use ? window.claude.use(n).catch(() => null) : Promise.resolve(null));
   const [db, user, sample, mcp] = await Promise.all([use('db'), use('user'), use('sample'), use('mcp')]);
-  Object.assign(caps, { db, user, sample, mcp });
+  Object.assign(caps, { db, user, sample, mcp, remote: mcp });
   caps.uid = user ? await user.id().catch(() => null) : null;
   if (!db || !caps.uid) { phase = 'landing'; render(); return; }
   try {
@@ -1439,6 +1535,10 @@ function toast(message) {
     if (json === lastSavedJson || json === JSON.stringify(state)) return;
     lastSavedJson = json; state = hydrate(snapDoc.data()); if (!modalEl) render();
   }, (e) => { if (e?.code === 'revoked') { phase = 'expired'; render(); } });
+  caps.db.collection(`data/users/${caps.uid}`).doc('briefing').onSnapshot((d) => {
+    briefingUi.loaded = true; briefingUi.doc = d.exists ? d.data() : null;
+    if (!modalEl && route() === 'news') render();
+  }, () => { briefingUi.loaded = true; });
   if (store.get('el.mcp') === '1' && caps.mcp) refreshMarket();
 })();
 </script>
