@@ -14,13 +14,87 @@ The news thread uses exactly these sources and no others:
 - Morningstar UK: morningstar.co.uk
 - City AM: cityam.com
 - Forbes: forbes.com
-Always pass allowed_domains ["finance.yahoo.com","uk.finance.yahoo.com","bloomberg.com","cnbc.com","morningstar.co.uk","cityam.com","forbes.com"] on every search. Never add other domains (WSJ, FT, The Economist, NYT, Reuters, BBC, Guardian and MarketWatch block this crawler and make the search fail). Discard any result from another domain. Prefer Yahoo Finance, Bloomberg and CNBC for news; use Morningstar UK for funds, ETFs and investment trusts; skip Forbes opinion and contributor pieces unless nothing better exists. Set "publisher" to exactly one of: "Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes" (Yahoo Finance syndicated articles keep "Yahoo Finance" as publisher; you may mention the original outlet in the summary).
+Always pass allowed_domains ["finance.yahoo.com","uk.finance.yahoo.com","bloomberg.com","cnbc.com","morningstar.co.uk","cityam.com","forbes.com"] on every search. Never add other domains (WSJ, FT, The Economist, NYT, Reuters, BBC, Guardian and MarketWatch block this crawler and make the search fail). Discard any result from another domain. Prefer Yahoo Finance, Bloomberg and CNBC for news; use Morningstar UK for funds, ETFs and investment trusts; skip Forbes opinion and contributor pieces unless nothing better exists. Set "publisher" for WebSearch results to exactly one of: "Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes" (Yahoo Finance syndicated articles keep "Yahoo Finance" as publisher; you may mention the original outlet in the summary).
 
 a) Market overview for today (latest trading session): S&P 500, Nasdaq Composite, Dow Jones, FTSE 100, STOXX 600, Nikkei 225, Gold, Brent crude, US 10-year Treasury yield, GBP/USD, Bitcoin. Get the level and daily % change where the search results state them. Also the 3-5 main drivers (central banks, data releases, earnings, geopolitics).
 b) For each holding except cash (at most 15, largest first): search "<ticker> <name> news" (for UK listings also try the name alone). Keep up to 4 relevant items from the last 7 days.
 c) 6-10 general market headlines a UK-based long-term investor should know today, spread across the sources where they have recent coverage.
 
-Never invent a headline, number, date or URL. Every news item must be a result WebSearch actually returned, with its real URL. If a figure is not in the results, leave it null.
+d) Headlines from the FT, The New York Times, The Wall Street Journal and The Economist come from their free RSS feeds, not from WebSearch (WebSearch cannot reach them). Write the script below to /tmp/premium_feeds.py with the Write tool, run `python3 /tmp/premium_feeds.py > /tmp/premium.json 2> /tmp/premium.err` in Bash, and read /tmp/premium.json. If it is empty and /tmp/premium.err shows every feed failed (for example "403 Forbidden"), set "premiumStatus": "unavailable" and "premiumNews": []. Otherwise set "premiumStatus": "ok" and choose up to 24 items for "premiumNews" (at most 6 per publisher), preferring markets, economy, central banks, UK, and anything about the user's holdings; keep each item's publisher, title, url and publishedAt exactly as the script returned them and write a one-sentence summary from its description. Also copy any item clearly about a specific holding into that holding's "items" in holdingsNews.
+
+```python
+"""Fetch free RSS headlines from FT, NYT, WSJ and The Economist.
+
+Prints a JSON list of {publisher, title, url, publishedAt, summary} from the last
+72 hours, newest first. Feeds that fail are listed on stderr and skipped.
+"""
+import email.utils, html, json, re, sys, urllib.request
+from datetime import datetime, timedelta, timezone
+
+FEEDS = {
+    "Financial Times": ["https://www.ft.com/rss/home", "https://www.ft.com/markets?format=rss", "https://www.ft.com/companies?format=rss"],
+    "The New York Times": ["https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "https://rss.nytimes.com/services/xml/rss/nyt/YourMoney.xml"],
+    "The Wall Street Journal": ["https://feeds.a.dj.com/rss/RSSMarketsMain.xml", "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml", "https://feeds.a.dj.com/rss/RSSWorldNews.xml"],
+    "The Economist": ["https://www.economist.com/finance-and-economics/rss.xml", "https://www.economist.com/business/rss.xml", "https://www.economist.com/leaders/rss.xml"],
+}
+
+def text(block, tag):
+    m = re.search(rf"<{tag}\b[^>]*>(.*?)</{tag}>", block, re.S | re.I)
+    if not m:
+        return ""
+    v = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", m.group(1), flags=re.S)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html.unescape(v))).strip()
+
+def parse(xml, publisher, since):
+    out = []
+    for block in re.findall(r"<item\b[^>]*>(.*?)</item>", xml, re.S | re.I):
+        title, link = text(block, "title"), text(block, "link") or text(block, "guid")
+        if not title or not link.startswith("https://"):
+            continue
+        published = None
+        raw = text(block, "pubDate") or text(block, "dc:date")
+        if raw:
+            try:
+                d = email.utils.parsedate_to_datetime(raw)
+            except (TypeError, ValueError):
+                try:
+                    d = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except ValueError:
+                    d = None
+            if d is not None:
+                d = d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+                if d < since:
+                    continue
+                published = d.astimezone(timezone.utc).isoformat(timespec="seconds")
+        out.append({"publisher": publisher, "title": title, "url": link.split("?")[0] if "nytimes.com" in link else link,
+                    "publishedAt": published, "summary": text(block, "description")[:300]})
+    return out
+
+def main():
+    since = datetime.now(timezone.utc) - timedelta(hours=72)
+    items, seen = [], set()
+    for publisher, urls in FEEDS.items():
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "EquityLedger/1.0 (RSS reader)", "Accept": "application/rss+xml, application/xml, text/xml"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    xml = r.read().decode("utf-8", "replace")
+            except Exception as e:  # network policy, 403, timeout
+                print(f"skip {url}: {e}", file=sys.stderr)
+                continue
+            for it in parse(xml, publisher, since):
+                key = it["title"].lower()
+                if key not in seen:
+                    seen.add(key)
+                    items.append(it)
+    items.sort(key=lambda i: i["publishedAt"] or "", reverse=True)
+    json.dump(items, sys.stdout, ensure_ascii=False)
+
+if __name__ == "__main__":
+    main()
+```
+
+Never invent a headline, number, date or URL. Every news item must be a result WebSearch or the RSS script actually returned, with its real URL. If a figure is not in the results, leave it null.
 
 ## 3. Areas to focus (educational, conservative)
 Write 3-5 focus areas that combine the market picture with this portfolio. Rules:
@@ -44,9 +118,11 @@ Write the document to a local JSON file, then ArtifactData set, collection "data
   },
   "holdingsNews": [{"ticker": "VWRL", "name": "...", "items": [{"title": "...", "publisher": "Bloomberg", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}]}],
   "generalNews": [{"title": "...", "publisher": "...", "url": "https://...", "publishedAt": "YYYY-MM-DD or null", "summary": "<one sentence>"}],
+  "premiumNews": [{"title": "...", "publisher": "Financial Times", "url": "https://www.ft.com/...", "publishedAt": "...", "summary": "<one sentence>"}],
+  "premiumStatus": "ok | unavailable",
   "focusAreas": [{"title": "...", "rationale": "...", "type": "portfolio|market|research", "relatedTickers": []}],
   "riskNote": "This briefing is educational information, not regulated personal advice. Check suitability, costs and tax before acting.",
-  "sources": ["Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes"]
+  "sources": ["Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes", "Financial Times", "The New York Times", "The Wall Street Journal", "The Economist"]
 }
 
-Keep the whole document under 150 KB. Include holdings with no news found as {"ticker","name","items":[]}. After writing, reply with one line saying how many items you wrote.
+Keep the whole document under 200 KB. Include holdings with no news found as {"ticker","name","items":[]}. After writing, reply with one line saying how many items you wrote.

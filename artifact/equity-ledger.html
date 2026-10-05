@@ -262,6 +262,7 @@ tr.data-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent
 .fg-mini .fg-value strong { font-size: 32px; }
 .fg-mini-side { display: grid; gap: 12px; }
 @media (max-width: 600px) { .fg-overview { grid-template-columns: 1fr; } }
+.tag-sub { padding: 2px 5px; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
 .range-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px; align-items: center; }
 .range-row span { font-size: 12px; }
 .plain-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 12px; line-height: 1.55; color: var(--fg); }
@@ -1373,7 +1374,13 @@ const NEWS_SOURCES = [
   { name: 'Morningstar UK', domains: ['morningstar.co.uk'] },
   { name: 'City AM', domains: ['cityam.com'] },
   { name: 'Forbes', domains: ['forbes.com'] },
+  { name: 'Financial Times', domains: ['ft.com'], paywall: true },
+  { name: 'The New York Times', domains: ['nytimes.com'], paywall: true },
+  { name: 'The Wall Street Journal', domains: ['wsj.com'], paywall: true },
+  { name: 'The Economist', domains: ['economist.com'], paywall: true },
 ];
+const PREMIUM_SOURCES = ['Financial Times', 'The New York Times', 'The Wall Street Journal', 'The Economist'];
+const isPaywalled = (publisher) => Boolean(NEWS_SOURCES.find((x) => x.name === publisher)?.paywall);
 const sourceFor = (url) => { const h = hostOf(url); return NEWS_SOURCES.find((s) => s.domains.some((d) => h === d || h.endsWith(`.${d}`))) || null; };
 const briefingUi = { doc: null, loaded: false, publisher: 'all', requesting: false, requestedAt: Number(store.get('el.briefingRequestedAt')) || 0, error: null };
 const safeUrl = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && !x.username && !x.password ? x.toString() : null; } catch { return null; } };
@@ -1392,6 +1399,7 @@ function briefingData() {
       drivers: (Array.isArray(d.market.drivers) ? d.market.drivers : []).map(String).slice(0, 8) } : null,
     holdingsNews: (Array.isArray(d.holdingsNews) ? d.holdingsNews : []).map((g) => ({ ticker: String(g?.ticker || '').toUpperCase(), name: String(g?.name || ''), items: cleanItems(g?.items) })).filter((g) => g.ticker),
     generalNews: cleanItems(d.generalNews),
+    premiumNews: cleanItems(d.premiumNews), premiumStatus: d.premiumStatus || null,
     focusAreas: (Array.isArray(d.focusAreas) ? d.focusAreas : []).map((f) => ({ title: String(f?.title || ''), rationale: String(f?.rationale || ''), type: ['portfolio', 'market', 'research'].includes(f?.type) ? f.type : 'research', relatedTickers: Array.isArray(f?.relatedTickers) ? f.relatedTickers.map(String) : [] }))
       .filter((f) => f.title && !containsProhibitedInstrument(`${f.title} ${f.rationale}`) && !/\bprice\s+target\b|\bwill\s+(?:rise|fall|double|surge|crash)\b|\bguaranteed?\b/i.test(`${f.title} ${f.rationale}`)).slice(0, 6),
     riskNote: String(d.riskNote || 'This briefing is educational information, not regulated personal advice.'),
@@ -1410,13 +1418,13 @@ async function requestBriefing() {
   } finally { briefingUi.requesting = false; render(); }
 }
 const newsItem = (i, ticker = '') => `<a class="news-item" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">
-  <span class="news-meta"><b class="pub-preferred">${esc(i.publisher)}</b>${i.publishedAt ? ` · ${fmtDate(i.publishedAt)}` : ''}${ticker ? ` · <span class="tag">${esc(ticker)}</span>` : ''}</span>
+  <span class="news-meta"><b class="pub-preferred">${esc(i.publisher)}</b>${isPaywalled(i.publisher) ? ' <span class="tag tag-sub">Subscriber</span>' : ''}${i.publishedAt ? ` · ${fmtDate(i.publishedAt)}` : ''}${ticker ? ` · <span class="tag">${esc(ticker)}</span>` : ''}</span>
   <strong>${esc(i.title)}</strong>${i.summary ? `<p>${esc(i.summary)}</p>` : ''}</a>`;
 function newsView() {
   const b = briefingData();
   const pending = briefingUi.requestedAt && (!b?.generatedAt || Date.parse(b.generatedAt) < briefingUi.requestedAt) && Date.now() - briefingUi.requestedAt < 20 * 60_000;
   const updateBtn = `<button class="button button-primary" data-action="request-briefing" ${briefingUi.requesting || pending ? 'disabled' : ''}>${icon('refresh')}${pending ? 'Updating…' : 'Update briefing'}</button>`;
-  const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, with Bloomberg, CNBC, Morningstar UK, City AM and Forbes, refreshed every weekday morning and evening (UK time).', updateBtn);
+  const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, with Bloomberg, CNBC, Morningstar UK, City AM and Forbes, plus headlines from the FT, NYT, WSJ and The Economist. Refreshed every weekday morning and evening (UK time).', updateBtn);
   const statusBar = `<div class="market-status ${briefingUi.error ? 'warning' : ''}">${icon(briefingUi.error ? 'info' : 'calendar')}<span>${briefingUi.error ? esc(briefingUi.error) : pending ? 'Gathering today’s news and market data. This page updates by itself when the briefing is ready.' : b?.generatedAt ? `Briefing written ${relTime(b.generatedAt)}${b.market?.asOf ? ` for the ${fmtDate(b.market.asOf)} session` : ''}. Next scheduled update at 06:52 or 17:52 UK time on weekdays.` : 'Scheduled updates run at 06:52 and 17:52 UK time on weekdays.'}</span></div>`;
   if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + cmcSection() + cryptoSection();
   const m = b.market;
@@ -1441,9 +1449,10 @@ function newsView() {
     ${groups.length ? `<div class="news-groups">${groups.map((g) => { const h = held.get(g.ticker); return `<div class="panel"><div class="panel-header"><div class="ticker-cell"><span class="ticker-mark">${esc(g.ticker.slice(0, 4))}</span><div><strong>${esc(h?.name || g.name || g.ticker)}</strong><span>${esc(g.ticker)}${h ? ` · ${ASSET_CLASSES[h.assetClass] || ''}` : ''}</span></div></div></div><div class="panel-body news-list">${g.items.length ? g.items.map((i) => newsItem(i)).join('') : `<p class="panel-kicker">${pf === 'all' ? 'No notable news in the last week.' : 'Nothing from this publisher.'}</p>`}</div></div>`; }).join('')}</div>`
       : `<div class="panel">${emptyBlock('holdings', state.holdings.length ? 'No holding news yet' : 'Add holdings to get their news', state.holdings.length ? 'News for your holdings appears after the next briefing update.' : 'Each briefing searches news for every holding in your ledger. Add your investments on the Holdings page.', state.holdings.length ? '' : '<a class="button button-secondary" href="#holdings">Go to holdings</a>')}</div>`}
     ${missing.length ? `<p class="panel-kicker" style="margin-top:10px">${missing.map((h) => esc(h.ticker)).join(', ')} will be included in the next update.</p>` : ''}
+    ${premiumPanel(b, pass)}
     <div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today</p></div></div>
       <div class="panel-body news-list">${b.generalNews.filter(pass).map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>
-    <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; some Bloomberg articles need a subscription.</p>` +
+    <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; articles marked Subscriber need you to sign in.</p>` +
     cmcSection() + cryptoSection();
 }
 function fearGreedGauge(index, label) {
@@ -1500,6 +1509,16 @@ function cmcOverviewCard() {
         </div>
         <p class="panel-kicker">BTC dominance ${d.btcDominance === null ? '—' : pct(d.btcDominance, 1)} · Altcoin season ${d.altSeason ?? '—'}/100. Context for long-term decisions, not a trading signal.</p>
       </div></div></div></div>`;
+}
+function premiumPanel(b, pass) {
+  const items = b.premiumNews.filter(pass);
+  const groups = PREMIUM_SOURCES.map((name) => ({ name, items: items.filter((i) => i.publisher === name).slice(0, 6) })).filter((g) => g.items.length);
+  const body = groups.length
+    ? `<div class="news-groups">${groups.map((g) => `<div><div class="stat-label" style="margin-bottom:4px">${esc(g.name)}</div><div class="news-list">${g.items.map((i) => newsItem(i)).join('')}</div></div>`).join('')}</div>`
+    : `<p class="panel-kicker" style="line-height:1.6">${b.premiumStatus === 'unavailable'
+        ? 'The briefing job could not reach these feeds. Allow www.ft.com, rss.nytimes.com, feeds.a.dj.com and www.economist.com in the cloud environment’s network settings, then update the briefing.'
+        : b.premiumNews.length ? 'No headlines from these publishers match this filter.' : 'Headlines from these publishers appear after the next briefing update.'}</p>`;
+  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">FT, NYT, WSJ &amp; The Economist</h2><p class="panel-kicker">Free headlines from each publisher’s RSS feed. Articles open on their site, where you sign in with your subscription.</p></div></div><div class="panel-body">${body}</div></div>`;
 }
 function cryptoSection() {
   const ci = radarIntelligence();
