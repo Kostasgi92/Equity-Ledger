@@ -876,8 +876,52 @@ async function reviewPortfolio(question, ctx, signal) {
 /* =========================================================================
    Market data: Crypto.com connector (crypto quotes + radar)
    ========================================================================= */
-const MCP_SERVER = 'Crypto_com';
-const market = { radar: null, radarAt: null, radarError: null, refreshing: false, lastRefreshAt: 0 };
+// Crypto.com may appear under either name depending on how the connector was added.
+const CRYPTOCOM_SERVERS = ['Crypto.com', 'Crypto_com'];
+const market = { radar: null, radarAt: null, radarError: null, radarSource: null, refreshing: false, lastRefreshAt: 0 };
+async function callCryptoCom(tool, input) {
+  let last;
+  for (const server of CRYPTOCOM_SERVERS) {
+    try { return await caps.mcp.callTool(server, tool, input); } catch (e) { last = e; if (e?.code === 'tool_error') throw e; }
+  }
+  throw last;
+}
+/* CoinMarketCap rows come back as an array of objects (one row) or {headers, rows}. */
+function cmcRows(res) {
+  const p = payloadOf(res);
+  if (Array.isArray(p)) return p;
+  if (p && Array.isArray(p.headers) && Array.isArray(p.rows)) return p.rows.map((r) => Object.fromEntries(p.headers.map((h, i) => [h, r[i]])));
+  if (Array.isArray(res?.payload)) return res.payload;
+  return [];
+}
+// Large, established coins; the radar ranks them by CoinMarketCap rank at view time.
+const CMC_RADAR_IDS = '1,1027,1839,5426,52,74,2010,1958,11419,5805,5994,1975,6636,1831,2,6535,7083,512,8916,1321,4642,21794,20947,3635,328,2280,3794,11841,11840,3077,7226,7278,32196,24478,22974,4030,3155,3957,4705';
+const STABLECOINS = ['USDT', 'USDC', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDE', 'RLUSD', 'USD1', 'EUR', 'GBP'];
+function cmcQuoteItem(r) {
+  const price = Number(r.price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  return { symbol: String(r.symbol || '').toUpperCase(), instrument: String(r.name || r.symbol || ''), price, dayChange: Number(r.percent_change_24h) || 0,
+    volumeValue: Number(r.volume_24h) || 0, marketCap: Number(r.market_cap) || 0, rank: Number(r.rank) || 9999, cmcId: String(r.id || ''), timestamp: r.last_updated_time ? new Date(r.last_updated_time).toISOString() : new Date().toISOString() };
+}
+async function fetchCmcRadar() {
+  const rows = cmcRows(await caps.mcp.callTool(CMC_SERVER, 'get_crypto_quotes_latest', { id: CMC_RADAR_IDS }));
+  const items = rows.map(cmcQuoteItem).filter((t) => t && !STABLECOINS.includes(t.symbol)).sort((a, b) => a.rank - b.rank).slice(0, 25);
+  if (!items.length) throw new Error('CoinMarketCap market data was incomplete.');
+  return items;
+}
+async function fetchCmcQuote(h) {
+  let id = h.cmcId;
+  if (!id) {
+    const found = cmcRows(await caps.mcp.callTool(CMC_SERVER, 'search_cryptos', { query: h.ticker.toUpperCase().split('-')[0], limit: 5 }))
+      .filter((r) => String(r.symbol || '').toUpperCase() === h.ticker.toUpperCase().split('-')[0])
+      .sort((a, b) => (Number(a.rank) || 9999) - (Number(b.rank) || 9999))[0];
+    if (!found) throw new Error(`CoinMarketCap does not list ${h.ticker}.`);
+    id = String(found.id); h.cmcId = id;
+  }
+  const q = cmcRows(await caps.mcp.callTool(CMC_SERVER, 'get_crypto_quotes_latest', { id })).map(cmcQuoteItem).find(Boolean);
+  if (!q) throw new Error(`CoinMarketCap has no current price for ${h.ticker}.`);
+  return q;
+}
 function parseTicker(payload) {
   const t = typeof payload === 'string' ? JSON.parse(payload) : payload;
   const last = Number(t?.last ?? t?.a); const change = Number(t?.change ?? t?.c);
@@ -885,11 +929,11 @@ function parseTicker(payload) {
   return { price: last, dayChange: Number.isFinite(change) ? change * 100 : 0, timestamp: t?.timestamp ? new Date(isNaN(t.timestamp) ? t.timestamp : Number(t.timestamp)).toISOString() : new Date().toISOString(), volumeValue: Number(t?.volume_value ?? t?.vv) || 0, instrument: t?.instrument_name ?? t?.i };
 }
 async function fetchCryptoQuote(symbol) {
-  const res = await caps.mcp.callTool(MCP_SERVER, 'get_ticker', { instrument_name: `${symbol.toUpperCase().split('-')[0]}_USD` });
+  const res = await callCryptoCom('get_ticker', { instrument_name: `${symbol.toUpperCase().split('-')[0]}_USD` });
   return parseTicker(res.payload);
 }
 async function fetchRadar() {
-  const res = await caps.mcp.callTool(MCP_SERVER, 'get_tickers', {});
+  const res = await callCryptoCom('get_tickers', {});
   let p = res.payload; if (typeof p === 'string') p = JSON.parse(p);
   const list = Array.isArray(p) ? p : (p?.data || p?.result?.data || p?.tickers || []);
   const items = list.map((t) => { try { return parseTicker(t); } catch { return null; } })
@@ -897,7 +941,7 @@ async function fetchRadar() {
     // other quote currencies and stablecoins.
     .filter((t) => t && /^[A-Z0-9]+_?USD$/.test(t.instrument || '') && !/PYUSD$/.test(t.instrument))
     .map((t) => ({ ...t, symbol: t.instrument.replace(/_?USD$/, '') }))
-    .filter((t) => t.symbol && !['USDT', 'USDC', 'DAI', 'TUSD', 'FDUSD', 'PYUSD', 'USDE', 'RLUSD', 'USD1', 'EUR', 'GBP'].includes(t.symbol))
+    .filter((t) => t.symbol && !STABLECOINS.includes(t.symbol))
     .sort((a, b) => b.volumeValue - a.volumeValue).slice(0, 25);
   if (!items.length) throw new Error('Crypto.com top market data was incomplete.');
   return items;
@@ -991,23 +1035,34 @@ async function refreshMarket({ manual = false } = {}) {
   market.refreshing = true; market.lastRefreshAt = Date.now(); render();
   const failures = []; let updated = 0;
   try {
-    try { market.radar = await fetchRadar(); market.radarAt = new Date().toISOString(); market.radarError = null; store.set('el.mcp', '1'); }
-    catch (e) { market.radarError = mcpErrorText(e); if (isFatalMcp(e)) throw e; }
+    // Radar: Crypto.com first, CoinMarketCap when Crypto.com is not connected or fails.
+    const errors = [];
+    try { market.radar = await fetchRadar(); market.radarSource = 'Crypto.com'; }
+    catch (e) {
+      errors.push(`Crypto.com: ${mcpErrorText(e)}`);
+      try { market.radar = await fetchCmcRadar(); market.radarSource = 'CoinMarketCap'; }
+      catch (e2) { errors.push(`CoinMarketCap: ${mcpErrorText(e2)}`); market.radar = market.radar || null; }
+    }
+    if (errors.length < 2) { market.radarAt = new Date().toISOString(); market.radarError = null; store.set('el.mcp', '1'); }
+    else market.radarError = errors.join(' ');
     const fx = fxToGbp(state);
     const live = state.holdings.filter((h) => !isManuallyValued(h));
+    let cryptoComDown = market.radarSource !== 'Crypto.com';
     for (const h of live) {
       try {
-        const fromRadar = market.radar?.find((i) => i.symbol === h.ticker.toUpperCase().split('-')[0]);
-        const q = fromRadar && market.radarAt ? fromRadar : await fetchCryptoQuote(h.ticker);
+        const sym = h.ticker.toUpperCase().split('-')[0];
+        const fromRadar = market.radarAt && market.radar?.find((i) => i.symbol === sym);
+        let q = fromRadar || null; let source = fromRadar ? market.radarSource : null;
+        if (!q && !cryptoComDown) { try { q = await fetchCryptoQuote(h.ticker); source = 'Crypto.com'; } catch (e) { if (e?.code !== 'tool_error') cryptoComDown = true; } }
+        if (!q) { q = await fetchCmcQuote(h); source = 'CoinMarketCap'; }
         const priceInCur = (q.price * fx.USD) / fx[h.currency];
-        Object.assign(h, { price: round(priceInCur, 6), referencePrice: h.referencePrice ?? round(priceInCur, 6), dayChange: round(q.dayChange, 4), priceUpdatedAt: q.timestamp, priceError: null, updatedAt: new Date().toISOString() });
+        Object.assign(h, { price: round(priceInCur, 6), referencePrice: h.referencePrice ?? round(priceInCur, 6), dayChange: round(q.dayChange, 4), priceUpdatedAt: q.timestamp, priceSource: source, priceError: null, updatedAt: new Date().toISOString() });
         evaluateAlerts(state, h); updated += 1;
       } catch (e) {
-        if (isFatalMcp(e)) throw e;
         h.priceError = mcpErrorText(e); failures.push(`${h.ticker}: ${h.priceError}`);
       }
     }
-    if (live.length) logActivity(state, failures.length ? 'Market refresh partly completed' : 'Market prices refreshed', failures.length ? `${updated} holdings updated; ${failures.length} quotes failed` : `${updated} crypto holdings updated from Crypto.com`, 'market');
+    if (live.length) logActivity(state, failures.length ? 'Market refresh partly completed' : 'Market prices refreshed', failures.length ? `${updated} holdings updated; ${failures.length} quotes failed` : `${updated} crypto holdings updated`, 'market');
     if (live.length) save();
     if (manual) toast(failures.length ? `${updated} updated, ${failures.length} failed.` : 'Live prices refreshed.');
   } catch (e) {
@@ -1018,11 +1073,11 @@ async function refreshMarket({ manual = false } = {}) {
 const isFatalMcp = (e) => ['not_granted', 'not_in_manifest', 'server_not_connected', 'needs_reauth', 'blocked_by_policy', 'capability_disabled', 'revoked'].includes(e?.code);
 function mcpErrorText(e) {
   switch (e?.code) {
-    case 'not_granted': return 'Crypto.com access was not allowed for this page.';
-    case 'server_not_connected': case 'server_not_found': return 'Connect Crypto.com in your claude.ai connectors to get live crypto prices.';
-    case 'needs_reauth': return 'Reconnect Crypto.com in your claude.ai connectors.';
-    case 'tool_error': return 'No Crypto.com USD market exists for this symbol.';
-    case 'server_unavailable': return 'Crypto.com is unreachable right now.';
+    case 'not_granted': return 'access was not allowed for this page.';
+    case 'server_not_connected': case 'server_not_found': return 'not connected in your claude.ai connectors.';
+    case 'needs_reauth': return 'needs reconnecting in your claude.ai connectors.';
+    case 'tool_error': return 'no USD market for this symbol.';
+    case 'server_unavailable': return 'unreachable right now.';
     default: return e?.message && !e.code ? e.message : 'Live quote unavailable.';
   }
 }
@@ -1224,7 +1279,7 @@ function holdingsView(s) {
       <td><span class="tag">${esc(ASSET_CLASSES[h.assetClass] || h.assetClass)}</span></td>
       <td>${acc ? esc(acc.name) : '<span class="panel-kicker">Unassigned</span>'}</td>
       <td class="r mono">${units(h.units)}</td>
-      <td class="r mono">${money(h.price, h.currency, Number(h.price) < 10 ? 4 : 2)}<span class="price-source">${st === 'live' ? `Crypto.com · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
+      <td class="r mono">${money(h.price, h.currency, Number(h.price) < 10 ? 4 : 2)}<span class="price-source">${st === 'live' ? `${esc(h.priceSource || 'Crypto.com')} · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
       <td class="r mono">${gbp(h.valueGbp, 2)}</td>
       <td class="r mono ${Number(h.dayChange) > 0 ? 'positive' : Number(h.dayChange) < 0 ? 'negative' : ''}">${signedPct(Number(h.dayChange))}</td>
       <td class="r mono">${pct(h.dividendYield, 2)}</td>
@@ -1504,11 +1559,11 @@ function cryptoSection() {
   const body = !caps.mcp
     ? emptyBlock('coins', 'Live crypto markets are not available here', 'Open this page in claude.ai with the Crypto.com connector to see the crypto market radar.')
     : !radar.length
-      ? emptyBlock('coins', market.refreshing ? 'Loading market radar…' : 'Crypto radar is waiting', market.radarError ? esc(market.radarError) : 'Load the 25 most traded crypto markets from Crypto.com.', `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Load crypto radar</button>`)
+      ? emptyBlock('coins', market.refreshing ? 'Loading market radar…' : 'Crypto radar is waiting', market.radarError ? esc(market.radarError) : 'Load the 25 largest crypto markets from Crypto.com, or CoinMarketCap when Crypto.com is not connected.', `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Load crypto radar</button>`)
       : `<div class="table-wrap"><table style="min-width:560px"><thead><tr><th>#</th><th>Market</th><th class="r">Last (USD)</th><th class="r">24h</th><th class="r">24h volume (USD)</th><th></th></tr></thead><tbody>
         ${radar.map((r, i) => `<tr class="data-row"><td class="mono">${i + 1}</td><td><div class="ticker-cell"><span class="ticker-mark">${esc(r.symbol.slice(0, 4))}</span><div><strong>${esc(r.symbol)}</strong><span>${esc(r.instrument)}</span></div></div></td><td class="r mono">${money(r.price, 'USD', r.price < 10 ? 4 : 2)}</td><td class="r mono ${r.dayChange > 0 ? 'positive' : r.dayChange < 0 ? 'negative' : ''}">${signedPct(r.dayChange)}</td><td class="r mono">${new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 }).format(r.volumeValue)}</td><td>${held.has(r.symbol) ? '<span class="tag">You hold</span>' : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
-  return `<details class="panel crypto-panel" style="margin-top:16px" ${store.get('el.cryptoOpen') === '1' ? 'open' : ''}><summary class="panel-header"><div><h2 class="panel-title">Crypto market radar</h2><p class="panel-kicker">Sentiment ${esc(ci.sentiment)}${ci.btcChange24h !== undefined ? ` · BTC ${signedPct(ci.btcChange24h)} · ${ci.breadth}% of top 25 up` : ''} · live from Crypto.com</p></div>${caps.mcp && radar.length ? `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Refresh</button>` : ''}</summary>${body}</details>`;
+  return `<details class="panel crypto-panel" style="margin-top:16px" ${store.get('el.cryptoOpen') === '1' ? 'open' : ''}><summary class="panel-header"><div><h2 class="panel-title">Crypto market radar</h2><p class="panel-kicker">Sentiment ${esc(ci.sentiment)}${ci.btcChange24h !== undefined ? ` · BTC ${signedPct(ci.btcChange24h)} · ${ci.breadth}% of top 25 up` : ''} · live from ${esc(market.radarSource || 'Crypto.com')}</p></div>${caps.mcp && radar.length ? `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Refresh</button>` : ''}</summary>${body}</details>`;
 }
 
 /* =========================================================================
@@ -1806,7 +1861,10 @@ document.addEventListener('click', async (e) => {
   }
 });
 document.addEventListener('toggle', (e) => { if (e.target.classList?.contains('crypto-panel')) store.set('el.cryptoOpen', e.target.open ? '1' : '0'); }, true);
-function afterRender(r) { if ((r === 'news' || r === 'overview') && caps.mcp && !cmc.loading && !cmc.fetchedAt) setTimeout(() => loadCmc(), 0); }
+function afterRender(r) {
+  if ((r === 'news' || r === 'overview') && caps.mcp && !cmc.loading && !cmc.fetchedAt) setTimeout(() => loadCmc(), 0);
+  if (r === 'news' && caps.mcp && !market.radar && !market.refreshing && !market.lastRefreshAt) setTimeout(() => refreshMarket(), 0);
+}
 
 let toastTimer = null;
 function toast(message) {
