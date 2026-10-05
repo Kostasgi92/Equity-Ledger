@@ -1248,7 +1248,7 @@ function holdingsView(s) {
     <div class="account-value"><span class="stat-label">Value</span><strong>${gbp(accountValue.get(a.id) || 0)}</strong></div></div>`).join('');
   return pageHeading('Holdings', 'What you own.', 'Equities, funds, commodities, cash and crypto. Crypto can be priced live from CoinMarketCap; everything else uses the price you enter.',
     `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh prices'}</button><button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button>`) +
-    exampleBanner() + marketStatusBar(s) +
+    exampleBanner() +
     `<div class="section-heading"><h2>Investment accounts</h2><button class="button button-secondary" data-action="add-account">${icon('plus')}Add account</button></div>
     ${state.accounts.length ? `<div class="account-grid">${accounts}</div>` : '<p class="panel-kicker" style="margin:-4px 0 22px">Group holdings by ISA, pension or broker account to see tax-wrapper exposure.</p>'}
     <div class="section-heading"><h2>Positions</h2></div>
