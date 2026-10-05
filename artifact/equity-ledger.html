@@ -874,18 +874,9 @@ async function reviewPortfolio(question, ctx, signal) {
 }
 
 /* =========================================================================
-   Market data: Crypto.com connector (crypto quotes + radar)
+   Market data: CoinMarketCap connector (crypto quotes + radar)
    ========================================================================= */
-// Crypto.com may appear under either name depending on how the connector was added.
-const CRYPTOCOM_SERVERS = ['Crypto.com', 'Crypto_com'];
-const market = { radar: null, radarAt: null, radarError: null, radarSource: null, refreshing: false, lastRefreshAt: 0 };
-async function callCryptoCom(tool, input) {
-  let last;
-  for (const server of CRYPTOCOM_SERVERS) {
-    try { return await caps.mcp.callTool(server, tool, input); } catch (e) { last = e; if (e?.code === 'tool_error') throw e; }
-  }
-  throw last;
-}
+const market = { radar: null, radarAt: null, radarError: null, radarSource: 'CoinMarketCap', refreshing: false, lastRefreshAt: 0 };
 /* CoinMarketCap rows come back as an array of objects (one row) or {headers, rows}. */
 function cmcRows(res) {
   const p = payloadOf(res);
@@ -921,30 +912,6 @@ async function fetchCmcQuote(h) {
   const q = cmcRows(await caps.mcp.callTool(CMC_SERVER, 'get_crypto_quotes_latest', { id })).map(cmcQuoteItem).find(Boolean);
   if (!q) throw new Error(`CoinMarketCap has no current price for ${h.ticker}.`);
   return q;
-}
-function parseTicker(payload) {
-  const t = typeof payload === 'string' ? JSON.parse(payload) : payload;
-  const last = Number(t?.last ?? t?.a); const change = Number(t?.change ?? t?.c);
-  if (!Number.isFinite(last) || last <= 0) throw new Error('quote unavailable');
-  return { price: last, dayChange: Number.isFinite(change) ? change * 100 : 0, timestamp: t?.timestamp ? new Date(isNaN(t.timestamp) ? t.timestamp : Number(t.timestamp)).toISOString() : new Date().toISOString(), volumeValue: Number(t?.volume_value ?? t?.vv) || 0, instrument: t?.instrument_name ?? t?.i };
-}
-async function fetchCryptoQuote(symbol) {
-  const res = await callCryptoCom('get_ticker', { instrument_name: `${symbol.toUpperCase().split('-')[0]}_USD` });
-  return parseTicker(res.payload);
-}
-async function fetchRadar() {
-  const res = await callCryptoCom('get_tickers', {});
-  let p = res.payload; if (typeof p === 'string') p = JSON.parse(p);
-  const list = Array.isArray(p) ? p : (p?.data || p?.result?.data || p?.tickers || []);
-  const items = list.map((t) => { try { return parseTicker(t); } catch { return null; } })
-    // The full list names spot pairs "BTCUSD" (single tickers use "BTC_USD"); skip futures, perpetuals,
-    // other quote currencies and stablecoins.
-    .filter((t) => t && /^[A-Z0-9]+_?USD$/.test(t.instrument || '') && !/PYUSD$/.test(t.instrument))
-    .map((t) => ({ ...t, symbol: t.instrument.replace(/_?USD$/, '') }))
-    .filter((t) => t.symbol && !STABLECOINS.includes(t.symbol))
-    .sort((a, b) => b.volumeValue - a.volumeValue).slice(0, 25);
-  if (!items.length) throw new Error('Crypto.com top market data was incomplete.');
-  return items;
 }
 /* CoinMarketCap connector: Fear & Greed, market snapshot and whole-market technicals. */
 const CMC_SERVER = 'Coinmarketcap';
@@ -1016,14 +983,14 @@ function cryptoIntelligence() {
   return radarIntelligence();
 }
 function radarIntelligence() {
-  if (!market.radar?.length) return { sentiment: 'unavailable', status: 'unavailable', signals: [], timestamp: null, source: 'Crypto.com', error: market.radarError };
+  if (!market.radar?.length) return { sentiment: 'unavailable', status: 'unavailable', signals: [], timestamp: null, source: 'CoinMarketCap', error: market.radarError };
   const btc = market.radar.find((i) => i.symbol === 'BTC');
   const breadth = market.radar.filter((i) => i.dayChange > 0).length / market.radar.length;
   const avg = market.radar.reduce((s, i) => s + i.dayChange, 0) / market.radar.length;
   const btcChange = btc ? btc.dayChange : avg;
   const sentiment = btcChange >= 2 && breadth >= 0.6 ? 'bullish' : btcChange <= -2 && breadth <= 0.4 ? 'bearish' : 'neutral';
   return {
-    sentiment, status: market.radarError ? 'stale' : 'live', source: 'Crypto.com', timestamp: market.radarAt, error: market.radarError,
+    sentiment, status: market.radarError ? 'stale' : 'live', source: 'CoinMarketCap', timestamp: market.radarAt, error: market.radarError,
     breadth: round(breadth * 100, 0), btcChange24h: round(btcChange), averageChange24h: round(avg),
     signals: [`BTC 24h change ${signedPct(btcChange)}`, `${round(breadth * 100, 0)}% of the 25 most traded USD pairs are up on the day`, `Average 24h change across those pairs ${signedPct(avg)}`],
   };
@@ -1031,32 +998,21 @@ function radarIntelligence() {
 async function refreshMarket({ manual = false } = {}) {
   if (!caps.mcp) { if (manual) toast('Live prices are not available in this view. Edit prices by hand instead.'); return; }
   if (market.refreshing) return;
-  if (Date.now() - market.lastRefreshAt < 60_000) { if (manual) toast('Prices were refreshed under a minute ago.'); return; }
+  if (market.radar && !market.radarError && Date.now() - market.lastRefreshAt < 60_000) { if (manual) toast('Prices were refreshed under a minute ago.'); return; }
   market.refreshing = true; market.lastRefreshAt = Date.now(); render();
   const failures = []; let updated = 0;
   try {
-    // Radar: Crypto.com first, CoinMarketCap when Crypto.com is not connected or fails.
-    const errors = [];
-    try { market.radar = await fetchRadar(); market.radarSource = 'Crypto.com'; }
-    catch (e) {
-      errors.push(`Crypto.com: ${mcpErrorText(e)}`);
-      try { market.radar = await fetchCmcRadar(); market.radarSource = 'CoinMarketCap'; }
-      catch (e2) { errors.push(`CoinMarketCap: ${mcpErrorText(e2)}`); market.radar = market.radar || null; }
-    }
-    if (errors.length < 2) { market.radarAt = new Date().toISOString(); market.radarError = null; store.set('el.mcp', '1'); }
-    else market.radarError = errors.join(' ');
+    try { market.radar = await fetchCmcRadar(); market.radarAt = new Date().toISOString(); market.radarError = null; store.set('el.mcp', '1'); }
+    catch (e) { market.radarError = `CoinMarketCap: ${mcpErrorText(e)}`; }
     const fx = fxToGbp(state);
     const live = state.holdings.filter((h) => !isManuallyValued(h));
-    let cryptoComDown = market.radarSource !== 'Crypto.com';
     for (const h of live) {
       try {
         const sym = h.ticker.toUpperCase().split('-')[0];
-        const fromRadar = market.radarAt && market.radar?.find((i) => i.symbol === sym);
-        let q = fromRadar || null; let source = fromRadar ? market.radarSource : null;
-        if (!q && !cryptoComDown) { try { q = await fetchCryptoQuote(h.ticker); source = 'Crypto.com'; } catch (e) { if (e?.code !== 'tool_error') cryptoComDown = true; } }
-        if (!q) { q = await fetchCmcQuote(h); source = 'CoinMarketCap'; }
+        const q = (market.radarAt && market.radar?.find((i) => i.symbol === sym)) || await fetchCmcQuote(h);
+        if (q.cmcId && !h.cmcId) h.cmcId = q.cmcId;
         const priceInCur = (q.price * fx.USD) / fx[h.currency];
-        Object.assign(h, { price: round(priceInCur, 6), referencePrice: h.referencePrice ?? round(priceInCur, 6), dayChange: round(q.dayChange, 4), priceUpdatedAt: q.timestamp, priceSource: source, priceError: null, updatedAt: new Date().toISOString() });
+        Object.assign(h, { price: round(priceInCur, 6), referencePrice: h.referencePrice ?? round(priceInCur, 6), dayChange: round(q.dayChange, 4), priceUpdatedAt: q.timestamp, priceSource: 'CoinMarketCap', priceError: null, updatedAt: new Date().toISOString() });
         evaluateAlerts(state, h); updated += 1;
       } catch (e) {
         h.priceError = mcpErrorText(e); failures.push(`${h.ticker}: ${h.priceError}`);
@@ -1214,7 +1170,7 @@ function marketStatusBar(summary) {
   const live = state.holdings.filter((h) => !isManuallyValued(h)).length;
   const fail = summary.marketFailures.length;
   return `<div class="market-status ${fail ? 'warning' : ''}">${icon(fail ? 'info' : 'coins')}
-    <span>${live ? `${live} crypto holding${live > 1 ? 's' : ''} priced live from Crypto.com${summary.lastUpdated ? `, last update ${relTime(summary.lastUpdated)}` : ''}.` : 'All holdings use prices you enter.'} FX reference rates: ${fx}.${fail ? ` ${fail} quote${fail > 1 ? 's' : ''} failed: ${esc(summary.marketFailures.join('; '))}.` : ''}</span>
+    <span>${live ? `${live} crypto holding${live > 1 ? 's' : ''} priced live from CoinMarketCap${summary.lastUpdated ? `, last update ${relTime(summary.lastUpdated)}` : ''}.` : 'All holdings use prices you enter.'} FX reference rates: ${fx}.${fail ? ` ${fail} quote${fail > 1 ? 's' : ''} failed: ${esc(summary.marketFailures.join('; '))}.` : ''}</span>
     <button class="button button-secondary" data-action="edit-fx" style="margin-left:auto;padding:7px 11px">Set FX rates</button></div>`;
 }
 
@@ -1279,7 +1235,7 @@ function holdingsView(s) {
       <td><span class="tag">${esc(ASSET_CLASSES[h.assetClass] || h.assetClass)}</span></td>
       <td>${acc ? esc(acc.name) : '<span class="panel-kicker">Unassigned</span>'}</td>
       <td class="r mono">${units(h.units)}</td>
-      <td class="r mono">${money(h.price, h.currency, Number(h.price) < 10 ? 4 : 2)}<span class="price-source">${st === 'live' ? `${esc(h.priceSource || 'Crypto.com')} · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
+      <td class="r mono">${money(h.price, h.currency, Number(h.price) < 10 ? 4 : 2)}<span class="price-source">${st === 'live' ? `${esc(h.priceSource || 'CoinMarketCap')} · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
       <td class="r mono">${gbp(h.valueGbp, 2)}</td>
       <td class="r mono ${Number(h.dayChange) > 0 ? 'positive' : Number(h.dayChange) < 0 ? 'negative' : ''}">${signedPct(Number(h.dayChange))}</td>
       <td class="r mono">${pct(h.dividendYield, 2)}</td>
@@ -1290,7 +1246,7 @@ function holdingsView(s) {
   const accounts = state.accounts.map((a) => `<div class="account-card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><span class="tag">${esc(CLASSIFICATION_LABELS[a.classification] || ACCOUNT_TYPE_LABELS[a.accountType])}</span><div class="row-actions"><button class="button button-icon" data-action="edit-account" data-id="${a.id}" aria-label="Edit ${esc(a.name)}">${icon('edit')}</button><button class="button button-icon" data-action="delete-account" data-id="${a.id}" aria-label="Delete ${esc(a.name)}">${icon('trash')}</button></div></div>
     <h3>${esc(a.name)}</h3><p>${esc(a.provider)} · ${esc(a.baseCurrency)} · ${esc(MANAGEMENT_STYLES[a.managementStyle] || a.managementStyle)} · ${esc(RISK_APPETITES[a.riskAppetite] || a.riskAppetite)}</p>
     <div class="account-value"><span class="stat-label">Value</span><strong>${gbp(accountValue.get(a.id) || 0)}</strong></div></div>`).join('');
-  return pageHeading('Holdings', 'What you own.', 'Equities, funds, commodities, cash and crypto. Crypto can be priced live from Crypto.com; everything else uses the price you enter.',
+  return pageHeading('Holdings', 'What you own.', 'Equities, funds, commodities, cash and crypto. Crypto can be priced live from CoinMarketCap; everything else uses the price you enter.',
     `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh prices'}</button><button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button>`) +
     exampleBanner() + marketStatusBar(s) +
     `<div class="section-heading"><h2>Investment accounts</h2><button class="button button-secondary" data-action="add-account">${icon('plus')}Add account</button></div>
@@ -1556,14 +1512,15 @@ function cryptoSection() {
   const ci = radarIntelligence();
   const radar = market.radar || [];
   const held = new Set(state.holdings.filter((h) => h.assetClass === 'crypto').map((h) => h.ticker.toUpperCase()));
+  const compact = (n) => new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 2 }).format(n);
   const body = !caps.mcp
-    ? emptyBlock('coins', 'Live crypto markets are not available here', 'Open this page in claude.ai with the Crypto.com connector to see the crypto market radar.')
+    ? emptyBlock('coins', 'Live crypto markets are not available here', 'Open this page in claude.ai with the CoinMarketCap connector to see the crypto market radar.')
     : !radar.length
-      ? emptyBlock('coins', market.refreshing ? 'Loading market radar…' : 'Crypto radar is waiting', market.radarError ? esc(market.radarError) : 'Load the 25 largest crypto markets from Crypto.com, or CoinMarketCap when Crypto.com is not connected.', `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Load crypto radar</button>`)
-      : `<div class="table-wrap"><table style="min-width:560px"><thead><tr><th>#</th><th>Market</th><th class="r">Last (USD)</th><th class="r">24h</th><th class="r">24h volume (USD)</th><th></th></tr></thead><tbody>
-        ${radar.map((r, i) => `<tr class="data-row"><td class="mono">${i + 1}</td><td><div class="ticker-cell"><span class="ticker-mark">${esc(r.symbol.slice(0, 4))}</span><div><strong>${esc(r.symbol)}</strong><span>${esc(r.instrument)}</span></div></div></td><td class="r mono">${money(r.price, 'USD', r.price < 10 ? 4 : 2)}</td><td class="r mono ${r.dayChange > 0 ? 'positive' : r.dayChange < 0 ? 'negative' : ''}">${signedPct(r.dayChange)}</td><td class="r mono">${new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 }).format(r.volumeValue)}</td><td>${held.has(r.symbol) ? '<span class="tag">You hold</span>' : ''}</td></tr>`).join('')}
+      ? emptyBlock('coins', market.refreshing ? 'Loading from CoinMarketCap…' : market.radarError ? 'The radar could not load' : 'Crypto radar is waiting', market.radarError ? esc(market.radarError) : 'The 25 largest cryptocurrencies from CoinMarketCap.', market.refreshing ? '' : `<button class="button button-primary" data-action="refresh">${icon('refresh')}${market.radarError ? 'Try again' : 'Load crypto radar'}</button>`)
+      : `<div class="table-wrap"><table style="min-width:620px"><thead><tr><th>Rank</th><th>Coin</th><th class="r">Price (USD)</th><th class="r">24h</th><th class="r">Market cap</th><th class="r">24h volume</th><th></th></tr></thead><tbody>
+        ${radar.map((r) => `<tr class="data-row"><td class="mono">${r.rank < 9999 ? r.rank : '—'}</td><td><div class="ticker-cell"><span class="ticker-mark">${esc(r.symbol.slice(0, 4))}</span><div><strong>${esc(r.symbol)}</strong><span>${esc(r.instrument)}</span></div></div></td><td class="r mono">${money(r.price, 'USD', r.price < 10 ? 4 : 2)}</td><td class="r mono ${r.dayChange > 0 ? 'positive' : r.dayChange < 0 ? 'negative' : ''}">${signedPct(r.dayChange)}</td><td class="r mono">$${compact(r.marketCap || 0)}</td><td class="r mono">$${compact(r.volumeValue)}</td><td>${held.has(r.symbol) ? '<span class="tag">You hold</span>' : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
-  return `<details class="panel crypto-panel" style="margin-top:16px" ${store.get('el.cryptoOpen') === '1' ? 'open' : ''}><summary class="panel-header"><div><h2 class="panel-title">Crypto market radar</h2><p class="panel-kicker">Sentiment ${esc(ci.sentiment)}${ci.btcChange24h !== undefined ? ` · BTC ${signedPct(ci.btcChange24h)} · ${ci.breadth}% of top 25 up` : ''} · live from ${esc(market.radarSource || 'Crypto.com')}</p></div>${caps.mcp && radar.length ? `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}Refresh</button>` : ''}</summary>${body}</details>`;
+  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Crypto market radar</h2><p class="panel-kicker">${radar.length ? `${ci.breadth}% of the top 25 up today · BTC ${signedPct(ci.btcChange24h)} · CoinMarketCap · ${relTime(market.radarAt)}` : 'Top 25 cryptocurrencies by CoinMarketCap rank'}</p></div>${caps.mcp && radar.length ? `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh'}</button>` : ''}</div>${radar.length && market.radarError ? `<div class="market-status warning" style="margin:0 24px 12px">${icon('info')}<span>${esc(market.radarError)} Showing the last loaded figures.</span></div>` : ''}${body}</div>`;
 }
 
 /* =========================================================================
@@ -1594,14 +1551,14 @@ function holdingForm(h) {
   const isNew = !h; h = h || { assetClass: 'equity', currency: 'GBP', pricingMethod: 'live', dividendYield: 0 };
   const accOpts = `<option value="">Unassigned</option>${state.accounts.map((a) => `<option value="${a.id}" ${a.id === h.accountId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}`;
   const cryptoList = (market.radar || []).map((r) => `<option value="${esc(r.symbol)}">`).join('');
-  openModal(formShell(isNew ? 'Add a holding' : `Edit ${esc(h.ticker)}`, 'Prices are in the holding’s own currency. Crypto can follow Crypto.com live; other assets use the price you enter.',
+  openModal(formShell(isNew ? 'Add a holding' : `Edit ${esc(h.ticker)}`, 'Prices are in the holding’s own currency. Crypto can follow CoinMarketCap live; other assets use the price you enter.',
     field('h-ticker', 'Ticker', `<input id="h-ticker" list="crypto-symbols" required maxlength="20" value="${esc(h.ticker || '')}" placeholder="VWRL, MSFT, BTC"><datalist id="crypto-symbols">${cryptoList}</datalist>`) +
     field('h-name', 'Name', `<input id="h-name" required maxlength="120" value="${esc(h.name || '')}" placeholder="Vanguard FTSE All-World">`) +
     field('h-class', 'Asset class', `<select id="h-class">${opt(ASSET_CLASSES, h.assetClass)}</select>`) +
     field('h-currency', 'Currency', `<select id="h-currency">${['GBP', 'USD', 'EUR'].map((c) => `<option ${c === h.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>`) +
     field('h-units', 'Units', `<input id="h-units" type="number" min="0" step="any" required value="${h.units ?? ''}">`) +
     field('h-price', 'Price per unit', `<input id="h-price" type="number" min="0" step="any" required value="${h.price ?? ''}">`, false, 'For crypto on live pricing, this is replaced on the next refresh.') +
-    field('h-pricing', 'Crypto pricing', `<select id="h-pricing"><option value="live" ${h.pricingMethod !== 'manual' ? 'selected' : ''}>Live from Crypto.com</option><option value="manual" ${h.pricingMethod === 'manual' ? 'selected' : ''}>Entered by me</option></select>`) +
+    field('h-pricing', 'Crypto pricing', `<select id="h-pricing"><option value="live" ${h.pricingMethod !== 'manual' ? 'selected' : ''}>Live from CoinMarketCap</option><option value="manual" ${h.pricingMethod === 'manual' ? 'selected' : ''}>Entered by me</option></select>`) +
     field('h-yield', 'Dividend yield %', `<input id="h-yield" type="number" min="0" max="100" step="0.01" value="${h.dividendYield ?? 0}">`) +
     field('h-account', 'Account', `<select id="h-account">${accOpts}</select>`) +
     field('h-theme', 'Theme', `<input id="h-theme" maxlength="60" value="${esc(h.theme || '')}" placeholder="Global equity, Gold, Income">`) +
