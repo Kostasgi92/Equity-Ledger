@@ -240,6 +240,22 @@ tr.data-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent
 .payoff-settle { text-align: right; } .payoff-settle span { margin: 0; } .payoff-settle strong { font: 700 18px var(--font-sans); letter-spacing: -.03em; color: var(--fg); font-variant-numeric: tabular-nums; }
 .payoff-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
 .drain-label a { color: var(--primary); }
+.cmc-grid { display: grid; grid-template-columns: minmax(220px, .8fr) 1.2fr; gap: 24px; align-items: start; }
+.cmc-grid > * { min-width: 0; }
+.cmc-fg { display: grid; justify-items: center; text-align: center; gap: 4px; }
+.fg-gauge { width: 100%; max-width: 240px; height: auto; margin-top: 6px; }
+.fg-value strong { display: block; font: 700 40px/1 var(--font-sans); letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.fg-value span { font: 600 16px var(--font-serif); color: var(--primary); }
+.fg-history { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.fg-hist { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); min-width: 82px; }
+.fg-hist span, .fg-hist em { color: var(--muted); font: 500 9px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; font-style: normal; }
+.fg-hist strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.cmc-side { display: grid; gap: 16px; }
+.cmc-label { margin: 6px 0 10px; font: 600 28px/1.1 var(--font-serif); color: var(--primary); }
+.cmc-label.positive { color: var(--positive); } .cmc-label.negative { color: var(--destructive); }
+.vote { font: 500 10px var(--font-mono); text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
+.index-tile small { font-size: 11px; color: var(--muted); font-weight: 500; }
+@media (max-width: 820px) { .cmc-grid { grid-template-columns: 1fr; } }
 .range-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 10px; align-items: center; }
 .range-row span { font-size: 12px; }
 .plain-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 12px; line-height: 1.55; color: var(--fg); }
@@ -880,7 +896,76 @@ async function fetchRadar() {
   if (!items.length) throw new Error('Crypto.com top market data was incomplete.');
   return items;
 }
+/* CoinMarketCap connector: Fear & Greed, market snapshot and whole-market technicals. */
+const CMC_SERVER = 'Coinmarketcap';
+const cmc = { data: null, error: null, loading: false, fetchedAt: 0 };
+function displayNum(v) {
+  if (typeof v === 'number') return v;
+  const m = String(v ?? '').replace(/,/g, '').match(/^\s*([+-]?\d+(?:\.\d+)?)\s*([KMBT%])?/i);
+  if (!m) return null;
+  const n = Number(m[1]); const mult = { K: 1e3, M: 1e6, B: 1e9, T: 1e12 }[(m[2] || '').toUpperCase()] || 1;
+  return n * mult;
+}
+const payloadOf = (res) => { let p = res?.payload; if (typeof p === 'string') { try { p = JSON.parse(p); } catch { p = null; } } return p && typeof p === 'object' ? p : null; };
+async function loadCmc({ manual = false } = {}) {
+  if (!caps.mcp || cmc.loading) return;
+  if (!manual && cmc.fetchedAt && Date.now() - cmc.fetchedAt < 10 * 60_000) return;
+  cmc.loading = true; cmc.fetchedAt = Date.now(); if (route() === 'news') render();
+  try {
+    const [g, t] = await Promise.allSettled([
+      caps.mcp.callTool(CMC_SERVER, 'get_global_metrics_latest', {}),
+      caps.mcp.callTool(CMC_SERVER, 'get_crypto_marketcap_technical_analysis', {}),
+    ]);
+    if (g.status === 'rejected') throw g.reason;
+    const gp = payloadOf(g.value); const tp = t.status === 'fulfilled' ? payloadOf(t.value) : null;
+    const fg = gp?.sentiment?.fear_greed;
+    if (!fg?.current || !Number.isFinite(Number(fg.current.index))) throw new Error('CoinMarketCap did not return the Fear & Greed index.');
+    const hist = (k) => fg.history?.[k] && Number.isFinite(Number(fg.history[k].index)) ? { index: Number(fg.history[k].index), label: String(fg.history[k].value || '') } : null;
+    const mc = gp.market_size?.total_crypto_market_cap_usd;
+    cmc.data = {
+      asOf: String(gp.last_updated || ''),
+      fearGreed: { index: Number(fg.current.index), label: String(fg.current.value || ''), yesterday: hist('yesterday'), lastWeek: hist('last_week'), lastMonth: hist('last_month'),
+        yearMax: fg.yearly?.max ? { index: Number(fg.yearly.max.index), label: String(fg.yearly.max.value || ''), when: String(fg.yearly.max.timestamp || '') } : null,
+        yearMin: fg.yearly?.min ? { index: Number(fg.yearly.min.index), label: String(fg.yearly.min.value || ''), when: String(fg.yearly.min.timestamp || '') } : null },
+      marketCap: displayNum(mc?.current), mcChange24h: displayNum(mc?.percent_change?.['24h']), mcChange7d: displayNum(mc?.percent_change?.['7d']), mcChange30d: displayNum(mc?.percent_change?.['30d']),
+      btcDominance: displayNum(gp.dominance?.btc?.current), altSeason: Number.isFinite(Number(gp.rotation?.altcoin_season?.current?.index)) ? Number(gp.rotation.altcoin_season.current.index) : null,
+      volume24h: displayNum(gp.liquidity?.volume24h?.total?.current),
+      macdHist: displayNum(tp?.macd?.histogram), rsi14: displayNum(tp?.rsi?.rsi14), pivot: displayNum(tp?.pivotPoint), techMarketCap: displayNum(tp?.currentMarketCap),
+    };
+    cmc.error = null; store.set('el.cmc', '1');
+  } catch (e) {
+    cmc.error = e?.code === 'not_granted' ? 'CoinMarketCap access was not allowed for this page.'
+      : e?.code === 'server_not_connected' || e?.code === 'server_not_found' ? 'Connect CoinMarketCap in your claude.ai connectors to see Fear & Greed.'
+      : e?.code === 'needs_reauth' ? 'Reconnect CoinMarketCap in your claude.ai connectors.'
+      : e?.code === 'tool_error' && /1008/.test(e?.message || '') ? 'CoinMarketCap rate limit reached. Try again in a minute.'
+      : e?.message && !e.code ? e.message : 'CoinMarketCap is unavailable right now.';
+  } finally { cmc.loading = false; if (route() === 'news' || route() === 'overview') render(); }
+}
+/* Bullish / bearish lean from CoinMarketCap data only; each vote is shown to the user. */
+function cmcSentiment(d) {
+  if (!d) return null;
+  const votes = [];
+  const fg = d.fearGreed.index;
+  votes.push({ v: fg >= 55 ? 1 : fg <= 45 ? -1 : 0, text: `Fear & Greed ${fg} (${d.fearGreed.label || 'n/a'})` });
+  if (d.macdHist !== null) votes.push({ v: d.macdHist > 0 ? 1 : d.macdHist < 0 ? -1 : 0, text: `Market-cap MACD momentum ${d.macdHist > 0 ? 'rising' : d.macdHist < 0 ? 'fading' : 'flat'}` });
+  const cap = d.techMarketCap ?? d.marketCap;
+  if (d.pivot && cap) { const gap = (cap / d.pivot - 1) * 100; votes.push({ v: gap > 0.5 ? 1 : gap < -0.5 ? -1 : 0, text: `Total market cap ${gap > 0.5 ? 'above' : gap < -0.5 ? 'below' : 'at'} its pivot level` }); }
+  if (d.mcChange7d !== null) votes.push({ v: d.mcChange7d > 2 ? 1 : d.mcChange7d < -2 ? -1 : 0, text: `Market cap ${signedPct(d.mcChange7d)} over 7 days` });
+  const score = votes.reduce((a, x) => a + x.v, 0);
+  const label = score >= 2 ? 'Bullish' : score <= -2 ? 'Bearish' : score === 1 ? 'Leaning bullish' : score === -1 ? 'Leaning bearish' : 'Neutral';
+  return { label, score, max: votes.length, votes };
+}
 function cryptoIntelligence() {
+  if (cmc.data) {
+    const sm = cmcSentiment(cmc.data);
+    return { sentiment: sm.label.toLowerCase().includes('bull') ? 'bullish' : sm.label.toLowerCase().includes('bear') ? 'bearish' : 'neutral', sentimentLabel: sm.label,
+      fearGreedScore: cmc.data.fearGreed.index, classification: cmc.data.fearGreed.label, status: 'live', source: 'CoinMarketCap', timestamp: cmc.data.asOf, error: null,
+      signals: sm.votes.map((x) => x.text), btcDominance: cmc.data.btcDominance, altcoinSeasonIndex: cmc.data.altSeason,
+      ...(market.radar?.length ? { breadth: round(market.radar.filter((i) => i.dayChange > 0).length / market.radar.length * 100, 0), btcChange24h: round((market.radar.find((i) => i.symbol === 'BTC') || { dayChange: 0 }).dayChange) } : {}) };
+  }
+  return radarIntelligence();
+}
+function radarIntelligence() {
   if (!market.radar?.length) return { sentiment: 'unavailable', status: 'unavailable', signals: [], timestamp: null, source: 'Crypto.com', error: market.radarError };
   const btc = market.radar.find((i) => i.symbol === 'BTC');
   const breadth = market.radar.filter((i) => i.dayChange > 0).length / market.radar.length;
@@ -1322,7 +1407,7 @@ function newsView() {
   const updateBtn = `<button class="button button-primary" data-action="request-briefing" ${briefingUi.requesting || pending ? 'disabled' : ''}>${icon('refresh')}${pending ? 'Updating…' : 'Update briefing'}</button>`;
   const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, with Bloomberg, CNBC, Morningstar UK, City AM and Forbes, refreshed every weekday morning and evening (UK time).', updateBtn);
   const statusBar = `<div class="market-status ${briefingUi.error ? 'warning' : ''}">${icon(briefingUi.error ? 'info' : 'calendar')}<span>${briefingUi.error ? esc(briefingUi.error) : pending ? 'Gathering today’s news and market data. This page updates by itself when the briefing is ready.' : b?.generatedAt ? `Briefing written ${relTime(b.generatedAt)}${b.market?.asOf ? ` for the ${fmtDate(b.market.asOf)} session` : ''}. Next scheduled update at 06:52 or 17:52 UK time on weekdays.` : 'Scheduled updates run at 06:52 and 17:52 UK time on weekdays.'}</span></div>`;
-  if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + cryptoSection();
+  if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + cmcSection() + cryptoSection();
   const m = b.market;
   const held = new Map(state.holdings.map((h) => [h.ticker.toUpperCase(), h]));
   const covered = new Set(b.holdingsNews.map((g) => g.ticker));
@@ -1348,10 +1433,45 @@ function newsView() {
     <div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today</p></div></div>
       <div class="panel-body news-list">${b.generalNews.filter(pass).map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>
     <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; some Bloomberg articles need a subscription.</p>` +
-    cryptoSection();
+    cmcSection() + cryptoSection();
+}
+function fearGreedGauge(index, label) {
+  const ang = (v) => Math.PI * (1 - v / 100);
+  const pt = (v, r) => [100 + r * Math.cos(ang(v)), 100 - r * Math.sin(ang(v))];
+  const arc = (a, b, color) => { const [x1, y1] = pt(a, 80); const [x2, y2] = pt(b, 80); return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} A80 80 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" stroke="${color}" stroke-width="16" fill="none" stroke-linecap="butt"/>`; };
+  const [nx, ny] = pt(index, 62);
+  return `<svg class="fg-gauge" viewBox="0 0 200 118" role="img" aria-label="Fear and Greed ${index} of 100, ${esc(label)}">
+    ${arc(0, 24.5, 'var(--destructive)')}${arc(25.5, 44.5, 'var(--c2)')}${arc(45.5, 54.5, 'var(--c6)')}${arc(55.5, 74.5, 'var(--c3)')}${arc(75.5, 100, 'var(--positive)')}
+    <line x1="100" y1="100" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="var(--fg)" stroke-width="3" stroke-linecap="round"/><circle cx="100" cy="100" r="6" fill="var(--fg)"/>
+    <text x="14" y="116" font-size="9" fill="var(--muted)" font-family="DM Mono, monospace">0</text><text x="178" y="116" font-size="9" fill="var(--muted)" font-family="DM Mono, monospace">100</text></svg>`;
+}
+function cmcSection() {
+  if (!caps.mcp) return '';
+  const d = cmc.data;
+  if (!d) return `<div class="panel" style="margin-top:16px">${emptyBlock('coins', cmc.loading ? 'Loading CoinMarketCap sentiment…' : 'Crypto sentiment from CoinMarketCap', cmc.error ? esc(cmc.error) : 'Fear & Greed, market sentiment and dominance from your CoinMarketCap connector.', cmc.loading ? '' : `<button class="button button-secondary" data-action="load-cmc">${icon('refresh')}Load from CoinMarketCap</button>`)}</div>`;
+  const sm = cmcSentiment(d); const fg = d.fearGreed;
+  const chip = (name, h) => h ? `<div class="fg-hist"><span>${name}</span><strong>${h.index}</strong><em>${esc(h.label)}</em></div>` : '';
+  const tone = sm.score >= 1 ? 'positive' : sm.score <= -1 ? 'negative' : '';
+  const big = (n) => n === null ? '—' : `$${new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 2 }).format(n)}`;
+  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Crypto sentiment</h2><p class="panel-kicker">CoinMarketCap · daily snapshot ${esc(d.asOf.replace(/ 12:00 AM UTC\+0$/, ''))}</p></div><button class="button button-secondary" data-action="load-cmc" ${cmc.loading ? 'disabled' : ''}>${icon('refresh')}${cmc.loading ? 'Loading…' : 'Refresh'}</button></div>
+    <div class="panel-body"><div class="cmc-grid">
+      <div class="cmc-fg"><div class="stat-label">Fear &amp; Greed index</div>${fearGreedGauge(fg.index, fg.label)}<div class="fg-value"><strong>${fg.index}</strong><span>${esc(fg.label)}</span></div>
+        <div class="fg-history">${chip('Yesterday', fg.yesterday)}${chip('Last week', fg.lastWeek)}${chip('Last month', fg.lastMonth)}</div>
+        ${fg.yearMin && fg.yearMax ? `<p class="panel-kicker" style="margin-top:8px">12-month range ${fg.yearMin.index} (${esc(fg.yearMin.label)}) to ${fg.yearMax.index} (${esc(fg.yearMax.label)})</p>` : ''}</div>
+      <div class="cmc-side">
+        <div class="cmc-sentiment"><div class="stat-label">Market sentiment</div><div class="cmc-label ${tone}">${esc(sm.label)}</div>
+          <ul class="plain-list">${sm.votes.map((x) => `<li><span class="vote ${x.v > 0 ? 'positive' : x.v < 0 ? 'negative' : ''}">${x.v > 0 ? '▲ Bullish' : x.v < 0 ? '▼ Bearish' : '• Neutral'}</span> ${esc(x.text)}</li>`).join('')}</ul>
+          <p class="panel-kicker" style="margin-top:8px">Context, not a trading signal. ${sm.votes.filter((x) => x.v > 0).length} bullish, ${sm.votes.filter((x) => x.v < 0).length} bearish of ${sm.max} CoinMarketCap signals.</p></div>
+        <div class="index-grid">
+          <div class="index-tile"><span>Total market cap</span><strong class="num">${big(d.marketCap)}</strong><em class="num ${d.mcChange24h > 0 ? 'positive' : d.mcChange24h < 0 ? 'negative' : ''}">${d.mcChange24h === null ? 'n/a' : signedPct(d.mcChange24h)} 24h</em></div>
+          <div class="index-tile"><span>BTC dominance</span><strong class="num">${d.btcDominance === null ? '—' : pct(d.btcDominance, 2)}</strong><em>of total market cap</em></div>
+          <div class="index-tile"><span>Altcoin season</span><strong class="num">${d.altSeason ?? '—'}<small>/100</small></strong><em>${d.altSeason === null ? '' : d.altSeason >= 75 ? 'Altcoin season' : d.altSeason <= 25 ? 'Bitcoin season' : 'Mixed'}</em></div>
+          <div class="index-tile"><span>Market RSI (14)</span><strong class="num">${d.rsi14 === null ? '—' : d.rsi14.toFixed(1)}</strong><em>${d.rsi14 === null ? '' : d.rsi14 >= 70 ? 'Overbought zone' : d.rsi14 <= 30 ? 'Oversold zone' : 'Mid-range'}</em></div>
+        </div></div>
+    </div>${cmc.error ? `<div class="market-status warning" style="margin:12px 0 0">${icon('info')}<span>${esc(cmc.error)} Showing the last loaded figures.</span></div>` : ''}</div></div>`;
 }
 function cryptoSection() {
-  const ci = cryptoIntelligence();
+  const ci = radarIntelligence();
   const radar = market.radar || [];
   const held = new Set(state.holdings.filter((h) => h.assetClass === 'crypto').map((h) => h.ticker.toUpperCase()));
   const body = !caps.mcp
@@ -1652,13 +1772,14 @@ document.addEventListener('click', async (e) => {
     case 'delete-snapshot': confirmModal('Delete this saved review?', 'The snapshot will be removed permanently.', 'Delete review', async () => {
       try { await reviewsCol().doc(id).delete(); snapshots = snapshots.filter((x) => x.id !== id); render(); toast('Saved review deleted.'); } catch (err) { handleDbError(err, 'The review could not be deleted.'); } }); break;
     case 'request-briefing': requestBriefing(); break;
+    case 'load-cmc': loadCmc({ manual: true }); break;
     case 'news-publisher': briefingUi.publisher = el.dataset.pub; render(); break;
     case 'load-examples': loadExamples(); break;
     case 'clear-examples': clearExamples(); break;
   }
 });
 document.addEventListener('toggle', (e) => { if (e.target.classList?.contains('crypto-panel')) store.set('el.cryptoOpen', e.target.open ? '1' : '0'); }, true);
-function afterRender() { /* hook for per-view wiring; forms use delegated listeners */ }
+function afterRender(r) { if (r === 'news' && caps.mcp && !cmc.loading && !cmc.fetchedAt) setTimeout(() => loadCmc(), 0); }
 
 let toastTimer = null;
 function toast(message) {
