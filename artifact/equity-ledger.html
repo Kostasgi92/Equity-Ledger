@@ -400,8 +400,9 @@ function loanMetrics(l, state, now = new Date()) {
     const paymentsLeft = flows.length;
     // UK consumer credit: the lender may add up to 58 days' interest (28 days when a year or less remains).
     const days = paymentsLeft > 12 ? 58 : 28;
-    const charge = pv * (Math.pow(1 + apr / 100, days / 365) - 1);
-    Object.assign(out, { settlementBase: round(pv), earlyCharge: round(charge), settlement: round(Math.min(left, pv + charge)), paymentsLeft, projectedEnd: addMonths(thisMonth, paymentsLeft - 1) });
+    const enteredCharge = l.earlyRepaymentCharge !== null && l.earlyRepaymentCharge !== undefined && l.earlyRepaymentCharge !== '' && Number(l.earlyRepaymentCharge) >= 0 ? Number(l.earlyRepaymentCharge) : null;
+    const charge = enteredCharge ?? pv * (Math.pow(1 + apr / 100, days / 365) - 1);
+    Object.assign(out, { settlementBase: round(pv), earlyCharge: round(charge), earlyChargeSource: enteredCharge !== null ? 'entered' : 'estimated', settlement: round(Math.min(left, pv + charge)), paymentsLeft, projectedEnd: addMonths(thisMonth, paymentsLeft - 1) });
     out.interestSaved = round(Math.max(0, left - out.settlement));
     if (out.borrowed && apr > 0) {
       const x = 1 - (out.borrowed * i) / payment;
@@ -914,7 +915,7 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     // Store the calculated loan figures too, so the briefing job can read them.
-    state.liabilities.forEach((l) => { const m = loanMetrics(l, state); l.estimates = { settlementGbp: m.settlement, monthlyPaymentGbp: m.payment ? round(m.payment) : null, paymentsLeft: m.paymentsLeft, finalPaymentMonth: m.projectedEnd || m.endMonth, totalRepayableGbp: m.totalRepayable, totalInterestGbp: m.totalInterest, futureInterestGbp: m.interestSaved }; });
+    state.liabilities.forEach((l) => { const m = loanMetrics(l, state); l.estimates = { settlementGbp: m.settlement, earlyRepaymentChargeGbp: m.earlyCharge, earlyRepaymentChargeSource: m.earlyChargeSource || null, monthlyPaymentGbp: m.payment ? round(m.payment) : null, paymentsLeft: m.paymentsLeft, finalPaymentMonth: m.projectedEnd || m.endMonth, totalRepayableGbp: m.totalRepayable, totalInterestGbp: m.totalInterest, futureInterestGbp: m.interestSaved }; });
     const json = JSON.stringify(state);
     if (json === lastSavedJson) return;
     saving = saving.then(async () => {
@@ -1100,7 +1101,7 @@ function liabilitiesView(s) {
   const rows = ms.map(({ l, m }) => `<tr class="data-row">
       <td><strong>${esc(l.name)}</strong><span class="price-source">${pct(l.rate, 2)} APR · ${m.payment ? `${gbp(m.payment, 2)}/month` : 'no payment set'} · ${m.projectedEnd ? `last payment ${monthLabel(m.projectedEnd)}` : m.endMonth ? `ends ${monthLabel(m.endMonth)}` : esc(l.due || '')}</span></td>
       <td class="r mono">${gbp(m.left, 2)}${m.paymentsLeft ? `<span class="price-source">${m.paymentsLeft} payment${m.paymentsLeft === 1 ? '' : 's'}</span>` : ''}</td>
-      <td class="r mono">${m.settlement === null ? `<span class="price-source">Add a monthly payment or final month</span>` : `${gbp(m.settlement, 2)}<span class="price-source">Estimate</span>`}</td>
+      <td class="r mono">${m.settlement === null ? `<span class="price-source">Add a monthly payment or final month</span>` : `${gbp(m.settlement, 2)}<span class="price-source">${gbp(m.settlementBase, 2)} + ${gbp(m.earlyCharge, 2)} ${m.earlyChargeSource === 'entered' ? 'early repayment charge' : 'est. early charge'}</span>`}</td>
       <td class="r mono ${m.interestSaved > 0 ? 'positive' : ''}">${m.interestSaved === null ? '—' : gbp(m.interestSaved, 2)}</td>
       <td class="r mono">${m.totalRepayable === null ? (m.borrowed ? '—' : `<button class="button button-secondary" style="padding:6px 10px" data-action="edit-liability" data-id="${l.id}">Add amount borrowed</button>`) : `${gbp(m.totalRepayable, 2)}<span class="price-source">${gbp(m.totalInterest, 2)} interest</span>`}</td>
       <td><div class="row-actions"><button class="button button-icon" data-action="edit-liability" data-id="${l.id}" aria-label="Edit ${esc(l.name)}">${icon('edit')}</button><button class="button button-icon" data-action="delete-liability" data-id="${l.id}" aria-label="Delete ${esc(l.name)}">${icon('trash')}</button></div></td></tr>
@@ -1118,7 +1119,7 @@ function liabilitiesView(s) {
     <div class="panel">${rows ? `<div class="table-wrap"><table><thead><tr><th>Liability</th><th class="r">Left to repay</th><th class="r">Settle today</th><th class="r">Interest saved</th><th class="r">Total cost of loan</th><th><span hidden>Actions</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : emptyBlock('liabilities', 'No liabilities recorded', 'Add a mortgage, loan or card balance so net worth reflects what you owe.', `<button class="button button-primary" data-action="add-liability">${icon('plus')}Add liability</button>`)}</div>
     ${cards ? `<div class="section-heading"><h2>Full cost of each loan</h2></div><div class="account-grid">${cards}</div>` : ''}
-    <p class="panel-kicker" style="margin-top:10px;line-height:1.6">Settlement estimates discount the remaining payments at the APR and add the most a UK lender can charge for early settlement (58 days’ interest, or 28 when a year or less remains). Your lender’s quote can differ slightly. Net worth uses these estimates.</p>`;
+    <p class="panel-kicker" style="margin-top:10px;line-height:1.6">Settlement estimates discount the remaining payments at the APR and add your lender’s early repayment charge when you enter one, otherwise the most a UK lender can charge (58 days’ interest, or 28 when a year or less remains). Your lender’s quote can differ slightly. Net worth uses these estimates.</p>`;
 }
 
 function recurringView() {
@@ -1405,14 +1406,16 @@ function liabilityForm(l) {
     field('l-pay', 'Monthly payment (GBP)', `<input id="l-pay" type="number" min="0" step="0.01" value="${Number(l.monthlyPayment) > 0 ? l.monthlyPayment : ''}" placeholder="${linked ? `${linked.amountGbp} from your schedule` : 'Optional'}">`, false, linked ? 'Leave empty to use your recurring payment.' : 'Optional if you enter the final payment month.') +
     field('l-end', 'Final payment month', `<input id="l-end" type="month" value="${esc(l.endMonth || parseEndMonth(l.due) || '')}">`) +
     field('l-borrowed', 'Amount borrowed (GBP)', `<input id="l-borrowed" type="number" min="0" step="0.01" value="${Number(l.borrowedGbp) > 0 ? l.borrowedGbp : ''}" placeholder="Optional">`, false, 'The original loan amount. Used to work out the total cost of the loan.') +
+    field('l-erc', 'Early repayment charge (GBP)', `<input id="l-erc" type="number" min="0" step="0.01" value="${l.earlyRepaymentCharge ?? ''}" placeholder="Optional">`, false, 'From your lender, if known. Otherwise the ledger assumes the UK maximum of 58 days’ interest.') +
     field('l-cur', 'Original currency', `<select id="l-cur">${['GBP', 'USD', 'EUR'].map((c) => `<option ${c === l.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>`),
     isNew ? 'Add liability' : 'Save changes'), (f) => {
     const num = (id) => { const v = val(f, id); return v === '' ? null : Number(v); };
-    const data = { name: val(f, 'l-name'), currency: val(f, 'l-cur'), balanceGbp: Number(val(f, 'l-bal')), rate: Number(val(f, 'l-rate')), monthlyPayment: num('l-pay'), endMonth: val(f, 'l-end') || null, borrowedGbp: num('l-borrowed') };
+    const data = { name: val(f, 'l-name'), currency: val(f, 'l-cur'), balanceGbp: Number(val(f, 'l-bal')), rate: Number(val(f, 'l-rate')), monthlyPayment: num('l-pay'), endMonth: val(f, 'l-end') || null, borrowedGbp: num('l-borrowed'), earlyRepaymentCharge: num('l-erc') };
     if (!data.name) return 'Enter a name.';
     if (!Number.isFinite(data.balanceGbp) || data.balanceGbp < 0) return 'Left to repay must be zero or more.';
     if (!Number.isFinite(data.rate) || data.rate < 0 || data.rate > 100) return 'APR must be between 0 and 100.';
     for (const [k, label] of [['monthlyPayment', 'Monthly payment'], ['borrowedGbp', 'Amount borrowed']]) if (data[k] !== null && (!Number.isFinite(data[k]) || data[k] <= 0)) return `${label} must be greater than zero.`;
+    if (data.earlyRepaymentCharge !== null && (!Number.isFinite(data.earlyRepaymentCharge) || data.earlyRepaymentCharge < 0)) return 'Early repayment charge must be zero or more.';
     if (data.endMonth && !/^\d{4}-\d{2}$/.test(data.endMonth)) return 'Choose a valid final payment month.';
     data.due = data.endMonth ? monthLabel(data.endMonth) : (l.due || '');
     data.settlementGbp = null; data.settlementEstimated = null; data.settlementUpdatedAt = null;
