@@ -867,7 +867,8 @@ function handleDbError(e, fallback) {
 }
 function hydrate(data) {
   const base = emptyState();
-  const s = { ...base, ...(data || {}) };
+  // Store snapshots are frozen; work on a deep, writable copy.
+  const s = { ...base, ...(data ? JSON.parse(JSON.stringify(data)) : {}) };
   for (const k of ['holdings', 'accounts', 'liabilities', 'schedules', 'occurrences', 'alerts', 'activity']) if (!Array.isArray(s[k])) s[k] = [];
   s.fx = { ...base.fx, ...(s.fx || {}) }; s.targets = { ...base.targets, ...(s.targets || {}) };
   return s;
