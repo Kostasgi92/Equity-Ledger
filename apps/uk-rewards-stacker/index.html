@@ -87,9 +87,31 @@ ul.alts .why{grid-column:1/-1;font-size:13px;color:var(--muted)}
 .gain{font-size:14px;padding:10px 12px;border-radius:9px;background:var(--accent-soft)}
 .warn{font-size:13.5px;color:var(--warn)}
 
-details{font-size:14px}
-details summary{cursor:pointer;color:var(--muted)}
-details ul{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:5px}
+details.stack{border:1px solid var(--rule);border-radius:12px;padding:0;font-size:15px}
+details.stack.best{border-color:var(--accent);background:linear-gradient(var(--accent-soft),transparent 160px)}
+details.stack > summary{list-style:none;cursor:pointer;padding:14px 16px;display:flex;flex-direction:column;gap:10px;color:var(--ink)}
+details.stack > summary::-webkit-details-marker{display:none}
+.shead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.shead .eyebrow::before{content:"▸ ";display:inline-block;transition:transform .15s}
+details.stack[open] .shead .eyebrow::before{transform:rotate(90deg)}
+.eyebrow{font:500 11px/1.4 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stotal{font:700 26px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.stotal small{font:500 13px var(--f-mono);color:var(--muted);margin-left:8px}
+details.stack.best .stotal{font-size:34px}
+.combo{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.pchip{border:1.5px solid var(--c);border-radius:999px;padding:2px 10px;font-size:13px;font-weight:600}
+.plus{color:var(--muted);font-weight:600}
+.stackbody{padding:0 16px 16px;display:flex;flex-direction:column;gap:10px}
+.sub{font:600 13px var(--f-body);margin-top:6px;padding-top:10px;border-top:1px solid var(--rule)}
+.phase{font:500 11px/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+ul.earn{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+ul.earn li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;font-size:14px}
+ul.earn b{font-weight:600}
+ul.earn .why{grid-column:1/-1;font-size:13px;color:var(--muted)}
+ol.steps li{grid-template-columns:24px minmax(0,1fr)}
+details.rules{font-size:14px}
+details.rules summary{cursor:pointer;color:var(--muted)}
+details.rules ul{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:5px}
 
 @media (max-width:560px){
   form.search{grid-template-columns:1fr 1fr}
@@ -134,7 +156,7 @@ details ul{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;g
 
   <div id="result" style="display:flex;flex-direction:column;gap:18px"></div>
 
-  <details>
+  <details class="rules">
     <summary>How stacking works</summary>
     <ul>
       <li>Only one cashback portal counts per purchase: the last one you click.</li>
@@ -210,26 +232,42 @@ function score(stack, price){
   const parts = stack.map(o => ({o, v: o.layer === "discount" ? dVal : offerValue(o, base)}));
   return {parts, total: parts.reduce((s,p)=>s+p.v,0)};
 }
-function optimise(offers, price){
-  const groups = LAYERS.map(l => offers.filter(o => o.layer === l.id).sort((a,b)=>offerValue(b,price)-offerValue(a,price)).slice(0,10));
-  let best = null; const pick = [];
+// Every valid stack that can't take another provider, best first
+function allStacks(offers, price){
+  const groups = LAYERS.map(l => offers.filter(o => o.layer === l.id && offerValue(o, price) > 0).sort((a,b)=>offerValue(b,price)-offerValue(a,price)).slice(0,8));
+  const flat = groups.flat(), out = [], pick = [];
   (function rec(i){
     if (i === groups.length){
       if (!pick.length) return;
-      const s = score(pick, price);
-      if (!best || s.total > best.total + 1e-9) best = {...s, stack:[...pick]};
+      if (flat.some(o => !pick.includes(o) && check([...pick, o]).ok)) return;   // not maximal
+      out.push({...score(pick, price), stack:[...pick]});
       return;
     }
     rec(i+1);
     for (const o of groups[i]){ pick.push(o); if (check(pick).ok) rec(i+1); pick.pop(); }
   })(0);
-  return best;
+  return out.sort((a,b)=>b.total-a.total);
 }
-function whyNot(o, best){
-  const c = check([...best.stack.filter(b => b !== o), o]);
-  if (c.same) return `Only one ${LAYER[o.layer].name} per purchase, and ${c.same.platform} pays more.`;
+const optimise = (offers, price) => allStacks(offers, price)[0] || null;
+function whyNot(o, st){
+  const c = check([...st.stack, o]);
+  if (c.same) return `This stack already uses ${c.same.platform}: only one ${LAYER[o.layer].name} per purchase.`;
   if (!c.ok) return c.why;
   return "Adds nothing on this purchase.";
+}
+// How each provider earns, which is why they can sit together
+function earnsBy(o, st){
+  const g = st.stack.find(x => x.layer === "giftcard");
+  switch (o.layer){
+    case "discount":   return "cuts the price first; everything else earns on what's left.";
+    case "giftcard":   return "pays you for buying the gift card, whatever happens at checkout.";
+    case "portal":     return o.payWith ? `tracks your click, but only pays if ${o.payWith} pays.` : "tracks your click into the shop, not your card, so it works with any payment (including a gift card).";
+    case "checkout":   return "pays because you check out through it; the card behind it still earns.";
+    case "cardlinked": return "sees the linked card paying the shop and pays automatically.";
+    case "card":       return g ? `earns on the gift card purchase, because it pays ${g.platform}.` : "earns on whatever it pays.";
+    case "loyalty":    return "earns from your loyalty account, separate from how you pay.";
+  }
+  return "";
 }
 
 /* ---------- Example (shown until the first lookup) ---------- */
@@ -282,22 +320,75 @@ renderProviders();
 /* ---------- Result ---------- */
 let current = null;
 
-function stepsList(best){
-  const hasGift = best.stack.some(o => o.layer === "giftcard");
-  const ol = el("ol",{class:"steps"});
-  best.parts.slice().sort((a,b)=>LAYER[a.o.layer].i - LAYER[b.o.layer].i).forEach(p => {
-    ol.append(el("li",null,
-      el("div",null, el("span",{class:"sw", style:`background:${lcolor(p.o.layer)}`}), el("b",null,p.o.platform),
-        el("span",{class:"muted small"}, " · " + (p.o.rateText || pct(p.o.ratePct))),
-        el("span",{class:"how"}, p.o.howTo || "", p.o.layer === "card" && hasGift && !/gift/i.test(p.o.howTo||"") ? " Use it to buy the gift card." : "")),
-      el("span",{class:"val"}, gbp(p.v))));
-  });
-  return ol;
+// Turns a stack into dated, ordered actions
+function guide(st, r){
+  const by = Object.fromEntries(st.stack.map(o => [o.layer, o]));
+  const val = o => st.parts.find(p => p.o === o)?.v ?? 0;
+  const amt = gbp(r.price - (by.discount ? val(by.discount) : 0));
+  const shop = r.vendor, online = r.channel !== "instore";
+  const card = by.card, g = by.giftcard, portal = by.portal, cl = by.cardlinked, co = by.checkout, d = by.discount, loy = by.loyalty;
+  const lock = [portal, co, cl].find(o => o?.payWith)?.payWith;
+  const payer = card ? `your ${card.platform}` : lock ? `your ${lock}` : cl ? `a card linked to ${cl.platform}` : "your usual card";
+  const linked = cl && !payer.includes(cl.platform) ? ` (linked to ${cl.platform})` : "";
+  const phases = [["Before you shop",[]],["While shopping",[]],["At checkout",[]],["After you buy",[]]];
+  const add = (p, o, text, how) => phases[p][1].push({o, text, how});
+
+  if (cl) add(0, cl, `Check ${payer.startsWith("a card") ? "the card you'll pay with" : payer} is linked in ${cl.platform}.`, cl.howTo + (cl.payWith ? ` Needs ${cl.payWith}.` : ""));
+  if (g) add(0, g, `Buy a ${amt} ${shop} gift card in ${g.platform}` + (card ? `, paying for it with ${payer}.` : "."), g.howTo + " Wait until the code arrives before you shop.");
+  if (online && portal) add(1, portal, `Empty your ${shop} basket, then open ${shop} through ${portal.platform}.`, portal.howTo + " Finish the order in that same tab, and don't click any other cashback or voucher link after this.");
+  if (!online && portal) add(0, portal, `Activate ${portal.platform} for ${shop} before you go.`, portal.howTo);
+  if (d) add(1, d, `Apply ${d.platform}${d.rateText ? " (" + d.rateText + ")" : ""}.`, (d.howTo || "") + (portal ? ` Use a code listed on ${portal.platform}'s page, or the cashback may be declined.` : ""));
+  if (loy) add(2, loy, online ? `Sign in or add your ${loy.platform} number before paying.` : `Scan ${loy.platform} at the till.`, loy.howTo);
+  if (g) add(2, g, `Pay with the ${g.platform} gift card.`, "If the total is higher than the gift card, pay the rest with " + payer + ".");
+  else if (co) add(2, co, `Choose ${co.platform} at checkout` + (card ? `, funded by ${payer}.` : "."), co.howTo);
+  else if (card || cl || portal?.payWith) add(2, card || cl || portal, `Pay with ${payer}${linked}.`, card ? card.howTo : "");
+  if (portal) add(3, portal, `Check ${portal.platform} shows the purchase as tracked within 2 days.`, "If it doesn't, raise a missing-cashback claim with your order number. It usually pays after the return period ends (often 30 to 90 days).");
+  if (g) add(3, g, `Confirm the ${g.platform} reward posted.`, "Usually soon after the gift card is delivered.");
+  if (cl) add(3, cl, `Watch for the ${cl.platform} reward.`, "Card-linked rewards usually appear within a few days to a few weeks.");
+  if (card) add(3, card, `Points from ${card.platform} arrive on your statement.`, "");
+  return phases.filter(p => p[1].length);
 }
-function totalBlock(best, price){
+
+function stackCard(st, r, i, opts){
+  const price = r.price, best = opts.bestTotal;
+  const names = st.stack.slice().sort((a,b)=>LAYER[a.layer].i-LAYER[b.layer].i);
   const bar = el("div",{class:"bar", role:"img", "aria-label":"Value by provider"});
-  best.parts.slice().sort((a,b)=>LAYER[a.o.layer].i - LAYER[b.o.layer].i).forEach(p => { if (p.v > 0) bar.append(el("span",{style:`width:${p.v/best.total*100}%;background:${lcolor(p.o.layer)}`, title:`${p.o.platform}: ${gbp(p.v)}`})); });
-  return [el("div",{class:"big"}, gbp(best.total), el("small",null, pct(best.total/price*100)+" back")), bar];
+  st.parts.slice().sort((a,b)=>LAYER[a.o.layer].i - LAYER[b.o.layer].i).forEach(p => { if (p.v > 0) bar.append(el("span",{style:`width:${p.v/st.total*100}%;background:${lcolor(p.o.layer)}`, title:`${p.o.platform}: ${gbp(p.v)}`})); });
+
+  const body = el("div",{class:"stackbody"});
+  // What you earn from each
+  body.append(el("div",{class:"sub"},"What each provider pays"));
+  body.append(el("ul",{class:"earn"}, st.parts.slice().sort((a,b)=>LAYER[a.o.layer].i-LAYER[b.o.layer].i).map(p => el("li",null,
+    el("span",null, el("span",{class:"sw", style:`background:${lcolor(p.o.layer)}`}), el("b",null,p.o.platform), el("span",{class:"muted"}, " · " + (p.o.rateText || pct(p.o.ratePct)))),
+    el("span",{class:"val"}, gbp(p.v)),
+    el("span",{class:"why"}, "Combines because it " + earnsBy(p.o, st))))));
+  // Step by step
+  body.append(el("div",{class:"sub"},"Step by step"));
+  let n = 0;
+  guide(st, r).forEach(([phase, steps]) => {
+    body.append(el("div",{class:"phase"}, phase));
+    body.append(el("ol",{class:"steps", start:String(n+1), style:`counter-reset:s ${n}`}, steps.map(s => { n++; return el("li",null,
+      el("div",null, el("span",{class:"sw", style:`background:${lcolor(s.o.layer)}`}), el("b",null, s.text), s.how ? el("span",{class:"how"}, s.how) : null)); })));
+  });
+  // Left out
+  const left = opts.pool.filter(o => !st.stack.includes(o));
+  if (left.length){
+    body.append(el("div",{class:"sub"},"Can't add to this stack"));
+    body.append(el("ul",{class:"alts"}, left.map(o => el("li",null,
+      el("span",null, el("span",{class:"sw", style:`background:${lcolor(o.layer)}`}), el("b",{style:"font-weight:600"}, o.platform)),
+      el("span",{class:"val muted"}, gbp(offerValue(o, price))),
+      el("span",{class:"why"}, whyNot(o, st))))));
+  }
+
+  const diff = st.total - best;
+  const summary = el("summary",null,
+    el("div",{class:"shead"},
+      el("span",{class:"eyebrow"}, opts.label || (i === 0 ? "Best stack" : `Stack ${i+1}`) + ` · ${st.stack.length} provider${st.stack.length>1?"s":""}`),
+      el("span",{class:"stotal"}, gbp(st.total), el("small",null, pct(st.total/price*100) + (i > 0 && !opts.label && diff < -0.005 ? ` · ${gbp(-diff)} less` : "")))),
+    el("div",{class:"combo"}, names.map((o,k) => [k ? el("span",{class:"plus"},"+") : null, el("span",{class:"pchip", style:`--c:${lcolor(o.layer)}`}, o.platform)])),
+    bar);
+  const det = el("details",{class:"stack"+(i===0 && !opts.label ? " best" : ""), open: i === 0 || opts.open}, summary, body);
+  return det;
 }
 
 function renderResult(r){
@@ -305,33 +396,25 @@ function renderResult(r){
   const out = $("#result"); out.replaceChildren();
   const price = r.price;
   const mine = r.offers.filter(isMine);
-  const best = optimise(mine, price);
+  const stacks = allStacks(mine, price).slice(0, 5);
 
   const main = el("div",{class:"panel"});
   main.append(el("div",{class:"head"},
     el("h2",null, `${r.vendor} · ${gbp(price)} ${r.channel === "instore" ? "in store" : "online"}`),
     r.example ? el("span",{class:"tag example"},"Example") : el("span",{class:"tag"},"Estimate")));
 
-  if (!best){
+  if (!stacks.length){
     main.append(el("p",null,"None of your providers pay at this shop."));
   } else {
-    main.append(...totalBlock(best, price), stepsList(best));
-    if (best.stack.some(o=>o.layer==="discount") && best.stack.some(o=>o.layer==="portal"))
-      main.append(el("p",{class:"warn"},"Make sure the discount code is listed on the portal's page, or the cashback may be declined."));
-    else if (r.warning) main.append(el("p",{class:"warn"}, r.warning));
-  }
-
-  // Your other providers that pay here, with the reason they're not in the stack
-  const alts = best ? mine.filter(o => !best.stack.includes(o)) : [];
-  if (alts.length){
-    main.append(el("span",{class:"small muted"},"Your other options here"));
-    main.append(el("ul",{class:"alts"}, alts.map(o => el("li",null,
-      el("span",null, el("span",{class:"sw", style:`background:${lcolor(o.layer)}`}), el("b",{style:"font-weight:600"}, o.platform), el("span",{class:"muted"}, " · " + (o.rateText || pct(o.ratePct)))),
-      el("span",{class:"val muted"}, gbp(offerValue(o, price))),
-      el("span",{class:"why"}, whyNot(o, best))))));
+    const multi = stacks[0].stack.length;
+    main.append(el("p",{class:"small muted"}, stacks.length === 1
+      ? `One way to combine your providers here. You can use ${multi} of them on the same purchase.`
+      : `${stacks.length} ways to combine your providers here, best first. The best uses ${multi} providers on the same purchase. Tap a stack to open its guide.`));
+    stacks.forEach((st, i) => main.append(stackCard(st, r, i, {bestTotal: stacks[0].total, pool: mine})));
+    if (r.warning) main.append(el("p",{class:"warn"}, r.warning));
   }
   const covered = new Set(r.offers.map(o => norm(o.provider)));
-  const nothing = providers.filter(p => covered.has(norm(p)) === false && (r.missing||[]).some(m => norm(m) === norm(p)));
+  const nothing = providers.filter(p => !covered.has(norm(p)) && (r.missing||[]).some(m => norm(m) === norm(p)));
   const unknown = providers.filter(p => !covered.has(norm(p)) && !(r.missing||[]).some(m => norm(m) === norm(p)));
   if (nothing.length) main.append(el("p",{class:"small muted"}, "Nothing here from: " + nothing.join(", ") + "."));
   if (unknown.length && !r.example) main.append(el("p",{class:"small muted"}, "Not checked yet: " + unknown.join(", ") + ". Search again to include them."));
@@ -344,14 +427,16 @@ function renderResult(r){
       el("span",{class:"small muted"},"Could another app pay more here?"),
       el("button",{class:"btn", type:"button", id:"others", onclick:()=>lookupOthers(r)}, "Show other providers")));
   } else {
-    const all = optimise([...mine, ...r.others.filter(o=>!isMine(o))], price);
-    const gain = all && best ? all.total - best.total : (all ? all.total : 0);
+    const pool = [...mine, ...r.others.filter(o=>!isMine(o))];
+    const all = optimise(pool, price);
+    const gain = all ? all.total - (stacks[0]?.total || 0) : 0;
     more.append(el("h2",null,"Other providers"));
     if (gain > 0.005){
       const joins = all.stack.filter(o => !isMine(o)).map(o => o.platform);
-      more.append(el("p",{class:"gain"}, `Joining ${joins.join(" + ")} would add ${gbp(gain)}, for ${gbp(all.total)} in total.`));
+      more.append(el("p",{class:"gain"}, `Joining ${joins.join(" + ")} would add ${gbp(gain)} on this purchase.`));
+      more.append(stackCard(all, r, 0, {bestTotal: all.total, pool, label:"Best stack with new providers", open:false}));
     } else {
-      more.append(el("p",{class:"gain"}, "None of them beat your current stack on this purchase."));
+      more.append(el("p",{class:"gain"}, "None of them beat your best stack on this purchase."));
     }
     const list = r.others.filter(o=>!isMine(o)).sort((a,b)=>offerValue(b,price)-offerValue(a,price));
     more.append(el("ul",{class:"alts"}, list.map(o => el("li",null,
