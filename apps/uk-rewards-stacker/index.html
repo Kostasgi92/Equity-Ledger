@@ -1,0 +1,722 @@
+<title>UK Rewards Stacker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one working column. Search on top, the winning stack as a layered bar, then the overlap grid and every offer grouped by layer. */
+:root{
+  --bg:#F2F5F3; --surface:#FFFFFF; --sunk:#E8EEEA; --ink:#15221D; --muted:#596A63; --rule:#D5DED9;
+  --accent:#0E6A4E; --accent-ink:#FFFFFF; --accent-soft:#DCEFE6;
+  --ok:#1F7A4D; --bad:#B42318; --warn:#9A6400; --warn-soft:#FBF0D9;
+  --l-discount:#6D4AA8; --l-giftcard:#C25E1A; --l-portal:#1E6FB8; --l-checkout:#B03A6A;
+  --l-cardlinked:#2B8569; --l-card:#A07510; --l-loyalty:#5E6E2A;
+  --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1412; --surface:#161F1B; --sunk:#1D2823; --ink:#E3ECE7; --muted:#93A59D; --rule:#2A3832;
+  --accent:#4CC497; --accent-ink:#06261A; --accent-soft:#173328;
+  --ok:#5CCB8F; --bad:#F2796B; --warn:#E3B04F; --warn-soft:#2E2614;
+  --l-discount:#A98BE0; --l-giftcard:#F0965A; --l-portal:#6AAEEA; --l-checkout:#E57BA6;
+  --l-cardlinked:#5FCBA6; --l-card:#E0B54A; --l-loyalty:#A9BD5E; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1412; --surface:#161F1B; --sunk:#1D2823; --ink:#E3ECE7; --muted:#93A59D; --rule:#2A3832;
+  --accent:#4CC497; --accent-ink:#06261A; --accent-soft:#173328;
+  --ok:#5CCB8F; --bad:#F2796B; --warn:#E3B04F; --warn-soft:#2E2614;
+  --l-discount:#A98BE0; --l-giftcard:#F0965A; --l-portal:#6AAEEA; --l-checkout:#E57BA6;
+  --l-cardlinked:#5FCBA6; --l-card:#E0B54A; --l-loyalty:#A9BD5E; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--f-body);margin:0}
+.wrap{max-width:980px;margin:0 auto;padding-inline:20px;padding-block:28px 64px;display:flex;flex-direction:column;gap:22px}
+h1,h2,h3{font-family:var(--f-display);margin:0;line-height:1.15;text-wrap:balance}
+h1{font-size:clamp(28px,5vw,40px);font-weight:700;letter-spacing:-.01em}
+h2{font-size:20px;font-weight:700}
+h3{font-size:15px;font-weight:700}
+p{margin:0}
+.muted{color:var(--muted)}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.eyebrow{font:500 11px/1 var(--f-mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+a{color:var(--accent)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+header.top p{max-width:60ch}
+nav.tabs{display:flex;gap:4px;background:var(--sunk);padding:4px;border-radius:10px;flex-wrap:wrap}
+nav.tabs button{border:0;background:transparent;padding:7px 14px;border-radius:7px;cursor:pointer;font-weight:500;color:var(--muted)}
+nav.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+
+form.search{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;align-items:end}
+form.search .full{grid-column:1/-1}
+label.f{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:500;color:var(--muted);min-width:0}
+input[type=text],input[type=number],select,textarea{background:var(--bg);border:1px solid var(--rule);border-radius:9px;padding:10px 12px;width:100%;min-width:0;color:var(--ink)}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{border:1px solid var(--rule);background:var(--surface);padding:10px 16px;border-radius:9px;cursor:pointer;font-weight:600}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn:disabled{opacity:.55;cursor:default}
+.btn.small{padding:6px 11px;font-size:13px;font-weight:500}
+.chip{border:1px solid var(--rule);background:transparent;border-radius:999px;padding:4px 11px;font-size:13px;cursor:pointer;color:var(--ink)}
+.chip:hover{border-color:var(--accent)}
+.status{font-size:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.status .dot{animation:none}}
+.notice{background:var(--warn-soft);color:var(--ink);border-radius:10px;padding:10px 14px;font-size:14px}
+.notice b{color:var(--warn)}
+
+/* Result head */
+.reshead{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:baseline}
+.tag{font:500 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 7px;border-radius:5px;background:var(--sunk);color:var(--muted)}
+.tag.example{background:var(--warn-soft);color:var(--warn)}
+
+.stacks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:14px}
+.stack{border:1px solid var(--rule);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.stack.best{border-color:var(--accent);background:linear-gradient(var(--accent-soft),transparent 140px)}
+.big{font:700 34px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.big small{font:500 15px var(--f-mono);color:var(--muted);margin-left:6px}
+.bar{display:flex;height:16px;border-radius:5px;overflow:hidden;background:var(--sunk)}
+.bar span{display:block;height:100%}
+.bar span+span{border-left:2px solid var(--surface)}
+ol.steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px;counter-reset:s}
+ol.steps li{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:start;counter-increment:s;font-size:14px}
+ol.steps li::before{content:counter(s);font:500 12px/22px var(--f-mono);text-align:center;border-radius:50%;background:var(--sunk);height:22px}
+ol.steps .what{min-width:0}
+ol.steps .what b{font-weight:600}
+ol.steps .val{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:1px}
+.gain{font-size:14px;padding:8px 12px;border-radius:8px;background:var(--sunk)}
+
+/* Overlap grid */
+.gridwrap{overflow-x:auto;border:1px solid var(--rule);border-radius:10px}
+table.ov{border-collapse:collapse;font-size:12px;min-width:100%}
+table.ov th,table.ov td{border-bottom:1px solid var(--rule);border-right:1px solid var(--rule);padding:0;text-align:center}
+table.ov thead th{height:130px;vertical-align:bottom;padding:6px 0;min-width:30px;font-weight:500}
+table.ov thead th div{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap;margin:0 auto;max-height:120px;overflow:hidden;text-overflow:ellipsis}
+table.ov tbody th{text-align:left;padding:5px 10px;white-space:nowrap;font-weight:500;position:sticky;left:0;background:var(--surface);z-index:1;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+table.ov td button{border:0;background:transparent;width:30px;height:28px;cursor:pointer;font:600 13px var(--f-mono)}
+table.ov td.ok button{color:var(--ok)} table.ov td.bad button{color:var(--bad)} table.ov td.alt button{color:var(--muted)}
+table.ov td.self{background:var(--sunk)}
+table.ov td button[aria-pressed="true"]{outline:2px solid var(--accent);outline-offset:-3px;border-radius:4px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.legend b{font-family:var(--f-mono)}
+.explain{font-size:14px;min-height:1.5em}
+
+/* Offers by layer */
+.layer{display:flex;flex-direction:column;gap:8px}
+.layer header{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.layer header p{font-size:13px}
+.offers{display:flex;flex-direction:column;gap:0;border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.offer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;padding:10px 14px;border-top:1px solid var(--rule)}
+.offer:first-child{border-top:0}
+.offer .name{font-weight:600;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.offer .rate{font-family:var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
+.offer .rate small{display:block;color:var(--muted);font-size:12px}
+.offer .detail{grid-column:1/-1;font-size:13px;color:var(--muted)}
+.pill{font:500 10.5px/1 var(--f-mono);letter-spacing:.05em;text-transform:uppercase;padding:3px 6px;border-radius:4px;border:1px solid var(--rule);color:var(--muted)}
+.pill.mine{border-color:var(--accent);color:var(--accent)}
+.pill.low{border-color:var(--warn);color:var(--warn)}
+.pill.inbest{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+ul.notes{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+
+.answer{white-space:pre-wrap;font-size:14px;background:var(--bg);border-radius:10px;padding:12px 14px;min-height:2.5em}
+
+/* Wallet */
+.wallet{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:8px}
+.wallet label{display:flex;gap:9px;align-items:flex-start;padding:9px 11px;border:1px solid var(--rule);border-radius:9px;cursor:pointer;font-size:14px}
+.wallet label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.wallet input{margin-top:3px;accent-color:var(--accent)}
+.wallet small{display:block;color:var(--muted);font-size:12px}
+
+/* Rules tab */
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px}
+.rule{border-left:4px solid var(--c);padding:4px 0 4px 12px;display:flex;flex-direction:column;gap:4px}
+.rule p{font-size:14px}
+.guide{display:flex;flex-direction:column;gap:14px;max-width:72ch}
+.guide p{font-size:14.5px}
+
+.history{display:flex;flex-wrap:wrap;gap:6px}
+@media (max-width:640px){
+  form.search{grid-template-columns:1fr 1fr}
+  form.search .vendor{grid-column:1/-1}
+  .wrap{padding-inline:16px}
+  .big{font-size:28px}
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <span class="eyebrow">Cashback · points · vouchers — UK</span>
+      <h1>UK Rewards Stacker</h1>
+      <p class="muted">Name a shop and a spend. Claude lists every platform that pays you on it, then the page works out which ones stack, which ones clash, and the order to use them in.</p>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" id="tab-find" aria-selected="true" data-tab="find">Find</button>
+      <button role="tab" id="tab-wallet" aria-selected="false" data-tab="wallet">My wallet</button>
+      <button role="tab" id="tab-rules" aria-selected="false" data-tab="rules">How stacking works</button>
+    </nav>
+  </header>
+
+  <!-- FIND -->
+  <section id="pane-find" style="display:flex;flex-direction:column;gap:22px">
+    <div class="panel">
+      <form class="search" id="search" autocomplete="off">
+        <label class="f vendor">Shop or brand
+          <input type="text" id="q-vendor" placeholder="e.g. Currys, Booking.com, Sainsbury's" required>
+        </label>
+        <label class="f">Spend (£)
+          <input type="number" id="q-price" min="1" step="1" value="600" required>
+        </label>
+        <label class="f">Where
+          <select id="q-channel">
+            <option value="online">Online</option>
+            <option value="instore">In store</option>
+          </select>
+        </label>
+        <label class="f full">What you're buying (optional)
+          <input type="text" id="q-item" placeholder="e.g. laptop, weekly shop, hotel in Lisbon">
+        </label>
+        <div class="row full">
+          <button class="btn primary" type="submit" id="go">Find every reward</button>
+          <button class="btn" type="button" id="stop" hidden>Stop</button>
+          <span class="muted" style="font-size:13px">Try:</span>
+          <button type="button" class="chip" data-v="Currys" data-p="600">Currys</button>
+          <button type="button" class="chip" data-v="Booking.com" data-p="450">Booking.com</button>
+          <button type="button" class="chip" data-v="Sainsbury's" data-p="120" data-c="instore">Sainsbury's</button>
+          <button type="button" class="chip" data-v="Nike" data-p="140">Nike</button>
+          <button type="button" class="chip" data-v="Apple" data-p="1200">Apple</button>
+        </div>
+      </form>
+      <div class="status" id="status" hidden></div>
+      <div class="notice" id="nosample" hidden><b>Live lookup is off in this view.</b> Claude lookups run when the page is open in claude.ai and you allow it to use Claude. The example below still shows how stacking is scored.</div>
+      <div class="history" id="history" hidden></div>
+    </div>
+
+    <div id="result" style="display:flex;flex-direction:column;gap:22px"></div>
+  </section>
+
+  <!-- WALLET -->
+  <section id="pane-wallet" hidden>
+    <div class="panel">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <h2>Apps and cards you already use</h2>
+        <p class="muted" style="font-size:14px;max-width:62ch">Ticked items count as "yours". Each result shows the best stack you can do today, and separately what you'd gain by joining something new. Saved in this browser only.</p>
+      </div>
+      <div class="wallet" id="walletList"></div>
+      <form class="row" id="addWallet">
+        <input type="text" id="w-new" placeholder="Add another app or card, e.g. Chase, Monzo, Boots Advantage" style="flex:1;min-width:200px">
+        <button class="btn" type="submit">Add</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- RULES -->
+  <section id="pane-rules" hidden style="display:flex;flex-direction:column;gap:22px">
+    <div class="panel">
+      <h2>The seven layers</h2>
+      <p class="muted" style="font-size:14px;max-width:66ch">Every reward sits on one layer of a purchase. You get at most one offer per layer, and some layers block each other. The optimiser tries every legal combination and keeps the one that pays most.</p>
+      <div class="rules" id="rulesList"></div>
+    </div>
+    <div class="panel">
+      <h2>Clash rules the optimiser applies</h2>
+      <ul class="notes">
+        <li><b>One portal only.</b> TopCashback, Quidco, Avios eStore, Revolut Shops and the rest all use a tracking cookie; the last one you click before checkout takes the credit.</li>
+        <li><b>Gift card in, card-linked out.</b> If a Freecash or JamDoughnut gift card pays the retailer, Airtime Rewards, Amex Offers and bank offers never see a card payment at that retailer.</li>
+        <li><b>Gift card still earns card points.</b> You buy the gift card with a card, so Virgin Points, Avios or card cashback land on the gift card purchase. Check your card's terms: a few exclude gift-card merchants.</li>
+        <li><b>Gift card and portal usually stack.</b> Most portals pay on gift-card-funded orders. Some retailers exclude them; the offer's caveat says so when known.</li>
+        <li><b>Payment-locked offers need that card.</b> Revolut Shops, Revolut Merchant Rewards and Amex Offers only pay when that card pays. They can't combine with a different card's points, or with a gift card.</li>
+        <li><b>PayPal checkout hides the merchant.</b> PayPal+ boosts need PayPal checkout. The card funding PayPal usually still earns, but card-linked offers rarely track through PayPal.</li>
+        <li><b>Codes can void cashback.</b> A discount code not listed on the portal can cancel the portal's cashback. The best stack flags this when it uses both.</li>
+        <li><b>Loyalty always stacks.</b> Nectar, Clubcard and retailer apps sit on top of everything.</li>
+      </ul>
+    </div>
+    <div class="panel guide">
+      <h2>Your platforms at a glance</h2>
+      <p><b>Freecash.</b> Gift-card cashback marketplace: buy a retailer gift card at face value, get coins back (1,000 coins ≈ $1), redeemable for PayPal, Amazon vouchers or crypto. 40+ UK retailers, e.g. Sainsbury's ~2%, ASDA/Morrisons ~1.9%, M&amp;S ~4.9%, John Lewis ~2.8%, adidas ~7.9%, JD Sports ~5.3%, Currys ~4%.</p>
+      <p><b>Avios app.</b> Avios eStore is a click-through portal (roughly 1–12 Avios per £1). Avios in-store works on a registered card at listed retailers.</p>
+      <p><b>PayPal+.</b> 1 point per £10 via PayPal checkout, more on the PayPal debit card. The value is in boosted offers on rotating retailers (up to ~10 points/£1). 1,000 points = £10.</p>
+      <p><b>Revolut.</b> Shops: click through the app and pay with Revolut for up to ~3% (cash or RevPoints). Merchant Rewards: rotating offers you activate first. Both need the Revolut card to pay.</p>
+      <p><b>Airtime Rewards.</b> Card-linked: link a card once, shop normally at 150–250+ retailers, 1–10%+ back as mobile-bill credit or vouchers.</p>
+      <p><b>Engage.</b> Employer benefit (Reward Gateway): discounted eGift cards at 100+ retailers, reloadable cards and click-through cashback. The eGift cards behave like a gift-card layer.</p>
+      <p><b>Nectar.</b> 1 point/£1 at Sainsbury's (~0.5p each) plus personalised offers and Nectar Prices. Partners include Argos, eBay and Esso. Converts to Avios.</p>
+      <p><b>Virgin Atlantic credit card.</b> Reward+ 1.5 Virgin Points/£1, Reward 0.75/£1, double on Virgin Atlantic/Holidays. It's your card-earn layer, so it stacks with portals, PayPal+ and Airtime, and with gift cards when you use it to buy them.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- Model ---------- */
+const LAYERS = [
+  {id:"discount",  name:"Discount / code",     verb:"Apply",   rule:"Voucher codes, student or Blue Light discounts, employer discounts. Reduces the price before anything else is earned."},
+  {id:"giftcard",  name:"Gift-card cashback",  verb:"Buy",     rule:"Buy a retailer gift card through Freecash, JamDoughnut, Cheddar or Engage, then pay with it. Your card earns on the gift-card purchase."},
+  {id:"portal",    name:"Cashback portal",     verb:"Click",   rule:"Click through TopCashback, Quidco, Avios eStore, Revolut Shops etc. right before checkout. Last click wins."},
+  {id:"checkout",  name:"Checkout wallet",     verb:"Check out", rule:"PayPal+ boosted offers and similar. Requires paying through that wallet."},
+  {id:"cardlinked",name:"Card-linked offer",   verb:"Pay with linked card", rule:"Airtime Rewards, Amex Offers, bank offers. Triggers automatically when the linked card pays the retailer directly."},
+  {id:"card",      name:"Card earn",           verb:"Pay with", rule:"Points or cashback from the card that pays (or that buys the gift card)."},
+  {id:"loyalty",   name:"Retailer loyalty",    verb:"Scan",    rule:"Nectar, Clubcard, retailer apps. Stacks with everything."}
+];
+const LAYER = Object.fromEntries(LAYERS.map((l,i)=>[l.id,{...l,i}]));
+const lcolor = id => `var(--l-${id})`;
+
+const CATALOGUE = [
+  {name:"Freecash", note:"Gift-card cashback", keys:["freecash"], on:true},
+  {name:"Avios app / eStore", note:"Portal + in-store", keys:["avios estore","avios app","avios in-store","avios in store"], on:true},
+  {name:"PayPal+", note:"Checkout boosts", keys:["paypal"], on:true},
+  {name:"Revolut", note:"Shops, Merchant Rewards, RevPoints", keys:["revolut"], on:true},
+  {name:"Airtime Rewards", note:"Card-linked", keys:["airtime"], on:true},
+  {name:"Engage (employer)", note:"eGift cards, discounts", keys:["engage"], on:true},
+  {name:"Nectar", note:"Loyalty + eStore", keys:["nectar"], on:true},
+  {name:"Virgin Atlantic credit card", note:"Virgin Points card earn", keys:["virgin atlantic","virgin money","virgin reward","virgin red","virgin points"], on:true},
+  {name:"TopCashback", note:"Portal", keys:["topcashback"]},
+  {name:"Quidco", note:"Portal", keys:["quidco"]},
+  {name:"JamDoughnut", note:"Gift-card cashback", keys:["jamdoughnut","jam doughnut"]},
+  {name:"Cheddar", note:"Gift cards + card-linked", keys:["cheddar"]},
+  {name:"American Express", note:"Card earn + Amex Offers", keys:["amex","american express"]},
+  {name:"Tesco Clubcard", note:"Loyalty", keys:["clubcard"]},
+  {name:"Boots Advantage", note:"Loyalty", keys:["boots advantage"]},
+  {name:"Lloyds / Halifax Everyday Offers", note:"Bank card-linked", keys:["everyday offers","lloyds","halifax","bank of scotland"]},
+  {name:"NatWest / RBS MyRewards", note:"Bank card-linked", keys:["myrewards","natwest","rbs"]},
+  {name:"Curve", note:"Card wrapper cashback", keys:["curve"]},
+  {name:"Monzo", note:"Bank perks", keys:["monzo"]},
+  {name:"Chase UK", note:"Bank perks", keys:["chase"]},
+  {name:"Blue Light Card", note:"Discounts", keys:["blue light"]},
+  {name:"UNiDAYS / Student Beans", note:"Student discounts", keys:["unidays","student beans"]},
+  {name:"Perkbox / Vivup", note:"Employer perks", keys:["perkbox","vivup"]}
+];
+
+/* ---------- Storage (per-browser convenience) ---------- */
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch{ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
+};
+let wallet = store.get("ukrs.wallet", null);
+if (!Array.isArray(wallet)) wallet = CATALOGUE.map(c => ({name:c.name, note:c.note, keys:c.keys, on:!!c.on}));
+let history = store.get("ukrs.history", []);
+if (!Array.isArray(history)) history = [];
+
+const walletOn = () => wallet.filter(w => w.on);
+function isMine(o){
+  if (o.inWallet === true) return true;
+  const p = (o.platform + " " + (o.payWith||"")).toLowerCase();
+  return walletOn().some(w => (w.keys && w.keys.length ? w.keys : [w.name.toLowerCase()]).some(k => p.includes(k)));
+}
+
+/* ---------- Stacking engine ---------- */
+function payKey(s){
+  let t = String(s||"").toLowerCase().replace(/american express/g,"amex").replace(/[^a-z0-9 ]/g," ");
+  t = t.split(/\s+/).filter(w => w && !["card","credit","debit","the","a","your","any","reward","rewards","plus"].includes(w));
+  return t[0] || "";
+}
+function sameCard(a, b){ const x = payKey(a), y = payKey(b); return x && y && (x === y || x.startsWith(y) || y.startsWith(x)); }
+
+function check(stack){
+  const by = {};
+  for (const o of stack){ if (by[o.layer]) return {ok:false, why:`Both are ${LAYER[o.layer].name.toLowerCase()} offers: you can use only one.`}; by[o.layer] = o; }
+  const g = by.giftcard, cl = by.cardlinked, co = by.checkout;
+  if (g && cl) return {ok:false, why:`${cl.platform} needs your linked card to pay the retailer, but the ${g.platform} gift card pays instead.`};
+  if (g && co) return {ok:false, why:`Paying with a ${g.platform} gift card means no ${co.platform} checkout.`};
+  if (co && cl) return {ok:false, why:`${cl.platform} rarely tracks when the retailer is paid through ${co.platform}.`};
+  const locked = stack.filter(o => o.layer !== "giftcard" && o.payWith);
+  if (g){ const r = locked.find(o => o.layer !== "card"); if (r) return {ok:false, why:`${r.platform} only pays when ${r.payWith} pays the retailer, but the gift card pays.`}; }
+  for (let i=0;i<locked.length;i++) for (let j=i+1;j<locked.length;j++){
+    if (!sameCard(locked[i].payWith, locked[j].payWith))
+      return {ok:false, why:`${locked[i].platform} needs ${locked[i].payWith}; ${locked[j].platform} needs ${locked[j].payWith}. One payment can't be both.`};
+  }
+  return {ok:true};
+}
+
+function offerValue(o, base){
+  let v = base * (o.ratePct||0) / 100 + (o.fixedGBP||0);
+  if (o.capGBP != null && o.capGBP >= 0) v = Math.min(v, o.capGBP);
+  return Math.max(0, v);
+}
+function score(stack, price){
+  const d = stack.find(o => o.layer === "discount");
+  const dVal = d ? Math.min(price, offerValue(d, price)) : 0;
+  const base = price - dVal;
+  const parts = stack.map(o => ({o, v: o.layer === "discount" ? dVal : offerValue(o, base)}));
+  return {parts, total: parts.reduce((s,p)=>s+p.v,0)};
+}
+function optimise(offers, price){
+  const groups = LAYERS.map(l => offers.filter(o => o.layer === l.id).sort((a,b)=>offerValue(b,price)-offerValue(a,price)).slice(0,10));
+  let best = null, n = 0;
+  const pick = [];
+  (function rec(i){
+    if (i === groups.length){
+      n++;
+      if (!pick.length) return;
+      if (!check(pick).ok) return;
+      const s = score(pick, price);
+      if (!best || s.total > best.total + 1e-9) best = {...s, stack:[...pick]};
+      return;
+    }
+    rec(i+1);
+    for (const o of groups[i]){ pick.push(o); if (check(pick).ok) rec(i+1); pick.pop(); }
+  })(0);
+  return best;
+}
+
+/* ---------- Example (shown at rest) ---------- */
+const EXAMPLE = {
+  example:true, vendor:"Currys", category:"Electronics", price:600, channel:"online", item:"laptop",
+  vendorNote:"Illustrative rates for the layout. Run a lookup for current figures.",
+  offers:[
+    {platform:"Freecash", layer:"giftcard", ratePct:4, rateText:"4% back on a Currys gift card", payWith:null, howTo:"Buy a £600 Currys gift card in Freecash and use it at checkout.", caveat:"Coins post after the gift card is delivered.", confidence:"medium"},
+    {platform:"JamDoughnut", layer:"giftcard", ratePct:3, rateText:"~3% on Currys gift cards", payWith:null, howTo:"Buy the Currys gift card in the JamDoughnut app.", caveat:"Rate rotates; check in app.", confidence:"low"},
+    {platform:"Engage", layer:"giftcard", ratePct:3.5, rateText:"~3.5% off Currys eGift", payWith:null, howTo:"Buy a discounted Currys eGift card in Engage.", caveat:"Only if your employer offers Engage.", confidence:"low"},
+    {platform:"TopCashback", layer:"portal", ratePct:2.5, rateText:"up to 2.5% cashback", payWith:null, howTo:"Click through TopCashback to Currys before you add to basket.", caveat:"Some categories pay less than the headline rate.", confidence:"medium"},
+    {platform:"Quidco", layer:"portal", ratePct:2, rateText:"~2% cashback", payWith:null, howTo:"Click through Quidco to Currys.", caveat:"", confidence:"medium"},
+    {platform:"Avios eStore", layer:"portal", ratePct:2, rateText:"2 Avios/£1 (≈2% at 1p)", payWith:null, howTo:"Open the Avios app, search Currys, tap Shop now.", caveat:"Valued at 1p per Avios.", confidence:"medium"},
+    {platform:"Revolut Shops", layer:"portal", ratePct:1.5, rateText:"~1.5% back", payWith:"Revolut card", howTo:"Open Currys from the Revolut app and pay with Revolut.", caveat:"Needs the Revolut card to pay.", confidence:"low"},
+    {platform:"Airtime Rewards", layer:"cardlinked", ratePct:1, rateText:"~1% to your phone bill", payWith:null, howTo:"Pay Currys directly with a card linked to Airtime.", caveat:"", confidence:"medium"},
+    {platform:"Virgin Atlantic Reward+ card", layer:"card", ratePct:1.5, rateText:"1.5 Virgin Points/£1 (≈1.5%)", payWith:"Virgin Atlantic credit card", howTo:"Pay (or buy the gift card) with the Virgin Atlantic card.", caveat:"Valued at 1p per point.", confidence:"high"},
+    {platform:"Amex BA Premium Plus", layer:"card", ratePct:1.5, rateText:"1.5 Avios/£1 (≈1.5%)", payWith:"Amex", howTo:"Pay with the Amex BA card.", caveat:"Amex sometimes not accepted on gift-card sites.", confidence:"high"}
+  ],
+  warnings:["Don't use a voucher code that isn't listed on the portal, or the portal cashback may be declined."],
+  tips:["Gift card + portal + card points is the strongest pattern at big-box electronics retailers."]
+};
+
+/* ---------- DOM helpers ---------- */
+const $ = s => document.querySelector(s);
+function el(tag, attrs, ...kids){
+  const e = document.createElement(tag);
+  if (attrs) for (const [k,v] of Object.entries(attrs)){
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : String(k));
+  return e;
+}
+const gbp = v => "£" + (Math.round(v*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct = v => (Math.round(v*100)/100).toLocaleString("en-GB",{maximumFractionDigits:2}) + "%";
+
+/* ---------- Tabs ---------- */
+function showTab(id){
+  document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === id)));
+  ["find","wallet","rules"].forEach(t => { $("#pane-"+t).hidden = t !== id; });
+  store.set("ukrs.tab", id);
+}
+document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+showTab(store.get("ukrs.tab","find"));
+
+/* ---------- Wallet UI ---------- */
+function renderWallet(){
+  const list = $("#walletList"); list.replaceChildren();
+  wallet.forEach((w, i) => {
+    const cb = el("input",{type:"checkbox", id:"w-"+i});
+    cb.checked = !!w.on;
+    cb.addEventListener("change", () => { w.on = cb.checked; store.set("ukrs.wallet", wallet); if (current) renderResult(current); });
+    list.append(el("label",{for:"w-"+i}, cb, el("span",null, w.name, el("small",null, w.note||"Added by you"))));
+  });
+}
+$("#addWallet").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("#w-new").value.trim(); if (!v) return;
+  wallet.push({name:v, note:"Added by you", keys:[v.toLowerCase()], on:true});
+  $("#w-new").value = ""; store.set("ukrs.wallet", wallet); renderWallet(); if (current) renderResult(current);
+});
+renderWallet();
+
+$("#rulesList").replaceChildren(...LAYERS.map(l => el("div",{class:"rule", style:`--c:${lcolor(l.id)}`}, el("h3",null,l.name), el("p",{class:"muted"}, l.rule))));
+
+/* ---------- Result rendering ---------- */
+let current = null;
+
+function stackCard(title, best, price, opts){
+  const box = el("div",{class:"stack"+(opts.best?" best":"")});
+  box.append(el("span",{class:"eyebrow"}, title));
+  if (!best){ box.append(el("p",{class:"muted"}, opts.empty)); return box; }
+  const parts = best.parts.slice().sort((a,b)=>LAYER[a.o.layer].i - LAYER[b.o.layer].i);
+  box.append(el("div",{class:"big"}, gbp(best.total), el("small",null, pct(best.total/price*100)+" of "+gbp(price))));
+  const bar = el("div",{class:"bar", role:"img", "aria-label":"Value by layer"});
+  parts.forEach(p => { if (p.v > 0) bar.append(el("span",{style:`width:${p.v/best.total*100}%;background:${lcolor(p.o.layer)}`, title:`${p.o.platform}: ${gbp(p.v)}`})); });
+  box.append(bar);
+  const ol = el("ol",{class:"steps"});
+  parts.forEach(p => {
+    const L = LAYER[p.o.layer];
+    ol.append(el("li",null,
+      el("div",{class:"what"}, el("span",{class:"sw", style:`background:${lcolor(p.o.layer)}`}), el("b",null, p.o.platform), " — ", p.o.howTo || L.verb,
+        p.o.layer === "card" && best.stack.some(x=>x.layer==="giftcard") ? el("span",{class:"muted"}, " Use it to buy the gift card.") : null),
+      el("span",{class:"val"}, gbp(p.v))));
+  });
+  box.append(ol);
+  if (best.stack.some(o=>o.layer==="discount") && best.stack.some(o=>o.layer==="portal"))
+    box.append(el("p",{class:"gain"}, "Check the code is listed on the portal's page, or the portal may decline the cashback."));
+  if (opts.extra) box.append(opts.extra);
+  return box;
+}
+
+function renderResult(r){
+  current = r;
+  const out = $("#result"); out.replaceChildren();
+  const price = r.price;
+  const offers = r.offers.map(o => ({...o, mine:isMine(o)}));
+  const bestMine = optimise(offers.filter(o=>o.mine), price);
+  const bestAll = optimise(offers, price);
+
+  // Head + stacks
+  const head = el("div",{class:"panel"});
+  head.append(el("div",{class:"reshead"},
+    el("div",{style:"display:flex;flex-direction:column;gap:4px;min-width:0"},
+      el("h2",null, `${r.vendor} · ${gbp(price)} ${r.channel==="instore"?"in store":"online"}`),
+      el("p",{class:"muted", style:"font-size:14px"}, [r.category, r.item].filter(Boolean).join(" · ") + (r.vendorNote ? (r.category||r.item ? " — " : "") + r.vendorNote : ""))),
+    el("div",{class:"row"},
+      r.example ? el("span",{class:"tag example"},"Example data") : el("span",{class:"tag"}, "Claude estimate · " + new Date(r.at).toLocaleDateString("en-GB",{day:"numeric",month:"short"})),
+      !r.example && sample ? el("button",{class:"btn small", type:"button", onclick:()=>lookup({vendor:r.vendor, price:r.price, channel:r.channel, item:r.item}, true)}, "Refresh") : null)));
+
+  const stacks = el("div",{class:"stacks"});
+  let extra = null;
+  if (bestAll && bestMine && bestAll.total - bestMine.total > 0.005){
+    const newOnes = bestAll.stack.filter(o=>!o.mine).map(o=>o.platform);
+    extra = el("p",{class:"gain"}, `Joining ${newOnes.join(" + ")} would add ${gbp(bestAll.total-bestMine.total)} on this purchase.`);
+  }
+  stacks.append(stackCard("Best stack with your apps", bestMine, price, {best:true, empty:"None of your apps pay at this shop. See the best overall stack."}));
+  if (bestAll && (!bestMine || bestAll.total - bestMine.total > 0.005)) stacks.append(stackCard("Best stack overall", bestAll, price, {extra}));
+  else stacks.append(el("div",{class:"stack"}, el("span",{class:"eyebrow"},"Best stack overall"), el("p",null,"Your apps already cover the best stack found. Nothing new to join for this shop.")));
+  head.append(stacks);
+  out.append(head);
+
+  // Overlap grid
+  const inBest = new Set((bestMine?.stack||[]).concat(bestAll?.stack||[]));
+  const ordered = offers.slice().sort((a,b)=>LAYER[a.layer].i - LAYER[b.layer].i || offerValue(b,price)-offerValue(a,price));
+  const ov = el("div",{class:"panel"});
+  ov.append(el("div",{style:"display:flex;flex-direction:column;gap:4px"}, el("h2",null,"What overlaps with what"),
+    el("p",{class:"muted", style:"font-size:14px"},"Tap a cell to see why two offers stack or clash.")));
+  ov.append(el("div",{class:"legend"},
+    el("span",null, el("b",{style:"color:var(--ok)"},"✓"), " stack together"),
+    el("span",null, el("b",{style:"color:var(--bad)"},"✕"), " clash"),
+    el("span",null, el("b",null,"="), " same layer, pick one")));
+  const explain = el("p",{class:"explain muted"}, "");
+  const table = el("table",{class:"ov"});
+  const thr = el("tr",null, el("th",{style:"height:auto"}, ""));
+  ordered.forEach(o => thr.append(el("th",{scope:"col", title:o.platform}, el("div",null, el("span",{class:"sw", style:`background:${lcolor(o.layer)}`}), o.platform))));
+  table.append(el("thead",null,thr));
+  const tb = el("tbody");
+  let pressed = null;
+  ordered.forEach((a, i) => {
+    const tr = el("tr",null, el("th",{scope:"row", title:a.platform}, el("span",{class:"sw", style:`background:${lcolor(a.layer)}`}), a.platform));
+    ordered.forEach((b, j) => {
+      if (i === j){ tr.append(el("td",{class:"self"})); return; }
+      let cls, sym, why;
+      if (a.layer === b.layer){ cls="alt"; sym="="; why=`Same layer (${LAYER[a.layer].name.toLowerCase()}): use ${a.platform} or ${b.platform}, not both.`; }
+      else { const c = check([a,b]); cls = c.ok ? "ok":"bad"; sym = c.ok ? "✓":"✕"; why = c.ok ? `${a.platform} and ${b.platform} stack: different layers, no payment conflict.` : c.why; }
+      const btn = el("button",{type:"button", "aria-label":`${a.platform} with ${b.platform}`, title:why, "aria-pressed":"false"}, sym);
+      btn.addEventListener("click", () => { if (pressed) pressed.setAttribute("aria-pressed","false"); btn.setAttribute("aria-pressed","true"); pressed = btn; explain.textContent = why; explain.classList.remove("muted"); });
+      tr.append(el("td",{class:cls}, btn));
+    });
+    tb.append(tr);
+  });
+  table.append(tb);
+  ov.append(el("div",{class:"gridwrap"}, table), explain);
+  out.append(ov);
+
+  // Offers by layer
+  const all = el("div",{class:"panel"});
+  all.append(el("div",{style:"display:flex;flex-direction:column;gap:4px"}, el("h2",null,`Every platform found (${offers.length})`),
+    el("p",{class:"muted", style:"font-size:14px"},"Points are converted to pounds at the valuation shown. Rates move daily, so confirm in the app before you buy.")));
+  LAYERS.forEach(L => {
+    const list = ordered.filter(o => o.layer === L.id);
+    if (!list.length) return;
+    const box = el("div",{class:"offers"});
+    list.forEach(o => {
+      const v = offerValue(o, price);
+      box.append(el("div",{class:"offer"},
+        el("div",{class:"name"}, o.platform,
+          o.mine ? el("span",{class:"pill mine"},"yours") : null,
+          inBest.has(o) ? el("span",{class:"pill inbest"},"in best stack") : null,
+          o.payWith && o.layer !== "card" ? el("span",{class:"pill"}, "needs "+o.payWith) : null,
+          o.confidence === "low" ? el("span",{class:"pill low"},"check rate") : null),
+        el("div",{class:"rate"}, gbp(v), el("small",null, o.rateText || pct(o.ratePct))),
+        el("div",{class:"detail"}, o.howTo || "", o.caveat ? (o.howTo ? " " : "") + o.caveat : "")));
+    });
+    all.append(el("div",{class:"layer"},
+      el("header",null, el("h3",null, el("span",{class:"sw", style:`background:${lcolor(L.id)}`}), L.name), el("p",{class:"muted"}, L.rule)),
+      box));
+  });
+  out.append(all);
+
+  // Warnings + tips
+  if ((r.warnings||[]).length || (r.tips||[]).length){
+    const n = el("div",{class:"panel"});
+    if ((r.warnings||[]).length){ n.append(el("h2",null,"Watch out")); n.append(el("ul",{class:"notes"}, r.warnings.map(w=>el("li",null,w)))); }
+    if ((r.tips||[]).length){ n.append(el("h2",null,"Ways to squeeze more")); n.append(el("ul",{class:"notes"}, r.tips.map(w=>el("li",null,w)))); }
+    out.append(n);
+  }
+
+  // Follow-up
+  if (sample){
+    const ask = el("div",{class:"panel"});
+    const ta = el("textarea",{id:"followup", rows:"2", placeholder:"e.g. Is it worth paying with Revolut instead? Can I split the gift card across two orders?"});
+    const ans = el("div",{class:"answer", hidden:true});
+    const btn = el("button",{class:"btn", type:"button"}, "Ask Claude");
+    btn.addEventListener("click", () => followUp(ta.value.trim(), ans, btn, {offers, bestMine, bestAll}));
+    ask.append(el("h2",null,"Ask about this purchase"), ta, el("div",{class:"row"}, btn), ans);
+    out.append(ask);
+  }
+}
+
+/* ---------- Claude ---------- */
+let sample = null, ctl = null;
+
+function buildPrompt(q){
+  const today = new Date().toISOString().slice(0,10);
+  const mine = walletOn().map(w=>w.name).join(", ") || "none listed";
+  return `You are a UK consumer-rewards analyst. Today is ${today}.
+A shopper in the UK will spend £${q.price} at "${q.vendor}" (${q.channel === "instore" ? "in store" : "online"})${q.item ? `, buying: ${q.item}` : ""}.
+Apps and cards they already use: ${mine}.
+
+List EVERY realistic way to earn cashback, points, gift-card discounts or discounts on this purchase in the UK. Go through each family and include every platform that plausibly covers this retailer:
+- discount: retailer welcome/newsletter codes, UNiDAYS, Student Beans, TOTUM, Blue Light Card, employer discount portals, price-match or bundle tricks.
+- giftcard: Freecash gift cards, JamDoughnut, Cheddar, Engage/Perkbox/Vivup eGift cards, Airtime Rewards gift cards, supermarket gift-card bonus events.
+- portal (click-through, last click wins): TopCashback, Quidco, Avios eStore, Virgin Red, Nectar eStore, Revolut Shops, Monzo/other bank shopping portals, airline/hotel shopping portals.
+- checkout: PayPal+ offers, Klarna cashback/deals, Apple Pay/Google Pay promos.
+- cardlinked (auto on a linked card): Airtime Rewards, Amex Offers, Lloyds/Halifax/Bank of Scotland Everyday Offers, NatWest/RBS MyRewards, Santander, Revolut Merchant Rewards, Cheddar card-linked.
+- card (earn from the paying card): the user's own cards from the list above plus the 2–3 best general UK options (e.g. Amex BA Premium Plus, Amex Platinum Cashback, Virgin Atlantic Reward+, Curve cashback, Chase UK).
+- loyalty: Nectar, Tesco Clubcard, Boots Advantage, My Waitrose, the retailer's own scheme.
+Only include entries that plausibly apply to this retailer. If you don't recognise the retailer, say so in vendorNote and give the generic options.
+
+Convert points to an effective % of spend: Avios 1p, Virgin Points 1p, Nectar 0.5p, Clubcard 1p, RevPoints 1p, PayPal+ point 1p, Freecash 1,000 coins = $1 (≈0.78p per 10 coins). Say the valuation in rateText.
+
+Reply with ONLY a JSON object of this shape:
+{"vendor":"Currys","category":"Electronics","vendorNote":"","offers":[{"platform":"TopCashback","layer":"portal","ratePct":2.5,"fixedGBP":0,"capGBP":null,"rateText":"up to 2.5% cashback","payWith":null,"inWallet":false,"howTo":"Click through TopCashback to Currys before adding to basket.","caveat":"","confidence":"medium"}],"warnings":[""],"tips":[""]}
+
+Field rules:
+- layer: exactly one of discount, giftcard, portal, checkout, cardlinked, card, loyalty.
+- ratePct: number, effective % of spend for this purchase (use the rate for this item's category if rates differ). fixedGBP: flat £ bonus (0 if none). capGBP: max £ payable, or null.
+- payWith: the card or wallet that must pay the RETAILER for this offer to work ("Revolut card", "Amex", "PayPal", ...). For layer "card", the card's own name. null when any payment method works.
+- inWallet: true if it belongs to one of the user's apps or cards listed above.
+- howTo: one imperative sentence. caveat: short exclusions (gift cards excluded, new customers only, category exclusions), or "".
+- confidence: high / medium / low. You cannot browse, so give typical recent rates and mark "low" when unsure a partnership exists or the rate is a guess.
+- warnings: specific traps for this retailer (code voiding cashback, gift cards not accepted online, tracking issues). tips: concrete ways to get more (timing, splitting orders, bonus events, sign-up bonuses).
+Aim for 10–25 offers.`;
+}
+
+function clean(raw, q){
+  const layers = new Set(LAYERS.map(l=>l.id));
+  const num = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+  const str = v => (v == null ? "" : String(v)).slice(0, 400);
+  const offers = (Array.isArray(raw?.offers) ? raw.offers : []).filter(o => o && layers.has(o.layer) && o.platform).map(o => ({
+    platform: str(o.platform).slice(0,60), layer:o.layer,
+    ratePct: Math.min(100, Math.max(0, num(o.ratePct, 0))), fixedGBP: Math.max(0, num(o.fixedGBP, 0)),
+    capGBP: o.capGBP == null || o.capGBP === "" ? null : Math.max(0, num(o.capGBP, null) ?? 0),
+    rateText: str(o.rateText), payWith: o.payWith ? str(o.payWith).slice(0,50) : null,
+    inWallet: o.inWallet === true, howTo: str(o.howTo), caveat: str(o.caveat),
+    confidence: ["high","medium","low"].includes(o.confidence) ? o.confidence : "medium"
+  }));
+  const list = v => (Array.isArray(v) ? v : []).map(str).filter(Boolean).slice(0,8);
+  return {vendor: str(raw?.vendor) || q.vendor, category: str(raw?.category), vendorNote: str(raw?.vendorNote),
+    offers, warnings:list(raw?.warnings), tips:list(raw?.tips), price:q.price, channel:q.channel, item:q.item, at:Date.now()};
+}
+
+const ERR = {
+  not_granted:"Claude access wasn't allowed for this page, so live lookups are off.",
+  sampling_disabled:"Claude isn't available on this account.",
+  rate_limited:"Too many lookups for now. Wait a minute and try again.",
+  session_expired:"Your claude.ai session expired. Sign in again, then retry.",
+  invalid_json:"Claude's answer came back malformed. Try again.",
+  refused:"Claude declined this request. Try rewording the shop or item.",
+  empty_completion:"Claude returned nothing. Try again with a simpler item description.",
+  prompt_too_large:"The request was too large."
+};
+function setStatus(kind, text){
+  const s = $("#status");
+  s.hidden = !kind; s.replaceChildren();
+  if (kind === "busy") s.append(el("span",{class:"dot"}), el("span",null,text));
+  else if (kind) s.append(el("span",{style: kind==="err" ? "color:var(--bad)" : ""}, text));
+}
+
+async function lookup(q, refresh){
+  if (!sample){ setStatus("err","Live lookup isn't available in this view."); return; }
+  ctl?.abort(); ctl = new AbortController();
+  $("#go").disabled = true; $("#stop").hidden = false;
+  setStatus("busy", `Asking Claude about ${q.vendor}… this takes 20–60 seconds.`);
+  let chars = 0;
+  try {
+    const raw = await sample.json(buildPrompt(q), {
+      signal: ctl.signal,
+      cache: {gcTime: 6*3600*1000, refresh: !!refresh},
+      onText: ({text}) => { chars = text.length; const n = (text.match(/"platform"/g)||[]).length; setStatus("busy", `Claude is listing platforms for ${q.vendor}… ${n} found so far`); }
+    });
+    const r = clean(raw, q);
+    if (!r.offers.length){ setStatus("err", `Claude found no reward platforms for "${q.vendor}". Check the spelling or try the parent brand.`); return; }
+    setStatus(null);
+    history = [r, ...history.filter(h => !(h.vendor.toLowerCase() === r.vendor.toLowerCase() && h.price === r.price && h.channel === r.channel))].slice(0,8);
+    store.set("ukrs.history", history); renderHistory();
+    renderResult(r);
+  } catch(e){
+    if (e?.code === "cancelled") setStatus(null);
+    else setStatus("err", ERR[e?.code] || "The lookup failed partway. Try again.");
+    if (e?.code === "not_granted" || e?.code === "sampling_disabled"){ sample = null; $("#nosample").hidden = false; }
+  } finally {
+    $("#go").disabled = false; $("#stop").hidden = true;
+  }
+}
+
+async function followUp(question, out, btn, ctx){
+  if (!question || !sample) return;
+  const r = current;
+  const fmt = b => b ? b.stack.map(o=>o.platform).join(" + ") + ` = ${gbp(b.total)}` : "none";
+  const prompt = `You advise a UK shopper on stacking cashback and rewards. Be concise and concrete (under 180 words, plain text, no markdown headings).
+Purchase: £${r.price} at ${r.vendor} (${r.channel})${r.item ? ", "+r.item : ""}.
+Their apps/cards: ${walletOn().map(w=>w.name).join(", ")}.
+Offers found (layer | platform | rate | needs):
+${ctx.offers.map(o=>`${o.layer} | ${o.platform} | ${o.rateText || o.ratePct+"%"} | ${o.payWith||"-"}${o.mine?" | theirs":""}`).join("\n")}
+Best stack with their apps: ${fmt(ctx.bestMine)}. Best overall: ${fmt(ctx.bestAll)}.
+Stacking rules: one offer per layer; one portal (last click wins); a gift card paying the retailer blocks card-linked offers and wallet checkout, but the card that buys the gift card still earns; payment-locked offers need that card to pay the retailer.
+
+Question: ${question}`;
+  const c = new AbortController();
+  btn.disabled = true; out.hidden = false; out.textContent = "Thinking…";
+  try { await sample(prompt, {signal:c.signal, cache:false, onText:({text}) => { out.textContent = text; }}); }
+  catch(e){ out.textContent = (e?.text ? e.text + "\n\n" : "") + (ERR[e?.code] || "The answer was interrupted. Ask again."); }
+  finally { btn.disabled = false; }
+}
+
+/* ---------- History ---------- */
+function renderHistory(){
+  const h = $("#history"); h.replaceChildren();
+  if (!history.length){ h.hidden = true; return; }
+  h.hidden = false;
+  h.append(el("span",{class:"muted", style:"font-size:13px;align-self:center"},"Recent:"));
+  history.forEach(r => h.append(el("button",{type:"button", class:"chip", onclick:() => {
+    $("#q-vendor").value = r.vendor; $("#q-price").value = r.price; $("#q-channel").value = r.channel; $("#q-item").value = r.item || "";
+    renderResult(r);
+  }}, `${r.vendor} · ${gbp(r.price)}`)));
+}
+
+/* ---------- Form ---------- */
+$("#search").addEventListener("submit", e => {
+  e.preventDefault();
+  const q = {vendor: $("#q-vendor").value.trim(), price: Math.max(1, Number($("#q-price").value) || 0), channel: $("#q-channel").value, item: $("#q-item").value.trim()};
+  if (!q.vendor) return;
+  lookup(q, false);
+});
+$("#stop").addEventListener("click", () => ctl?.abort());
+document.querySelectorAll(".chip[data-v]").forEach(c => c.addEventListener("click", () => {
+  $("#q-vendor").value = c.dataset.v; $("#q-price").value = c.dataset.p; $("#q-channel").value = c.dataset.c || "online"; $("#q-item").value = "";
+  if (sample) $("#search").requestSubmit(); else $("#q-vendor").focus();
+}));
+
+/* ---------- Boot ---------- */
+renderHistory();
+renderResult(history[0] || EXAMPLE);
+if (window.claude?.use){
+  window.claude.use("sample").then(s => {
+    sample = s;
+    if (!s) $("#nosample").hidden = false;
+    if (current) renderResult(current);
+  }).catch(() => { $("#nosample").hidden = false; });
+} else {
+  $("#nosample").hidden = false;
+}
+})();
+</script>
