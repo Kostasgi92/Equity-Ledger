@@ -299,7 +299,7 @@ function el(tag, attrs, ...kids){
     if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v;
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? "" : v);
   }
-  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : String(k));
+  for (const k of kids.flat(Infinity)) if (k != null && k !== false) e.append(k.nodeType ? k : String(k));
   return e;
 }
 const gbp = v => "£" + (Math.round(v*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -385,7 +385,7 @@ function stackCard(st, r, i, opts){
     el("div",{class:"shead"},
       el("span",{class:"eyebrow"}, opts.label || (i === 0 ? "Best stack" : `Stack ${i+1}`) + ` · ${st.stack.length} provider${st.stack.length>1?"s":""}`),
       el("span",{class:"stotal"}, gbp(st.total), el("small",null, pct(st.total/price*100) + (i > 0 && !opts.label && diff < -0.005 ? ` · ${gbp(-diff)} less` : "")))),
-    el("div",{class:"combo"}, names.map((o,k) => [k ? el("span",{class:"plus"},"+") : null, el("span",{class:"pchip", style:`--c:${lcolor(o.layer)}`}, o.platform)])),
+    el("div",{class:"combo"}, names.flatMap((o,k) => [k ? el("span",{class:"plus"},"+") : null, el("span",{class:"pchip", style:`--c:${lcolor(o.layer)}`}, o.platform)])),
     bar);
   const det = el("details",{class:"stack"+(i===0 && !opts.label ? " best" : ""), open: i === 0 || opts.open}, summary, body);
   return det;
