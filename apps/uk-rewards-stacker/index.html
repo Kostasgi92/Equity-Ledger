@@ -183,7 +183,7 @@ const LAYERS = [
 ];
 const LAYER = Object.fromEntries(LAYERS.map((l,i)=>[l.id,{...l,i}]));
 const lcolor = id => `var(--l-${id})`;
-const DEFAULT_PROVIDERS = ["Freecash","Avios","PayPal+","Revolut","Airtime Rewards","Engage","Nectar","Virgin Atlantic credit card"];
+const DEFAULT_PROVIDERS = ["Freecash","Avios","PayPal+","Revolut","Airtime Rewards","Engage","Nectar","Virgin Atlantic credit card","Sky VIP"];
 
 /* ---------- Storage (this browser only) ---------- */
 const store = {
@@ -192,6 +192,11 @@ const store = {
 };
 let providers = store.get("ukrs.providers", null);
 if (!Array.isArray(providers) || !providers.length) providers = DEFAULT_PROVIDERS.slice();
+// One-time: add providers introduced after the list was first saved (the user can still remove them)
+if (!store.get("ukrs.added.skyvip", false)){
+  if (!providers.some(p => p.trim().toLowerCase() === "sky vip")) providers.push("Sky VIP");
+  store.set("ukrs.added.skyvip", true); store.set("ukrs.providers", providers);
+}
 let last = store.get("ukrs.last", null);
 
 const norm = s => String(s||"").trim().toLowerCase();
@@ -449,7 +454,7 @@ function renderResult(r){
 /* ---------- Claude ---------- */
 let sample = null, ctl = null;
 const LAYER_HELP = `Layers (use exactly one per offer):
-- discount: voucher codes, student/Blue Light/employer discounts
+- discount: voucher codes, student/Blue Light/employer discounts, member perks such as Sky VIP offers (Sky customers get partner discounts and freebies in the My Sky app; only include a Sky VIP offer if it plausibly covers this shop)
 - giftcard: buy a retailer gift card with cashback or at a discount (Freecash, JamDoughnut, Engage eGift...)
 - portal: click-through cashback site/app, last click wins (Avios eStore, Revolut Shops, TopCashback...)
 - checkout: offers that need paying through a wallet (PayPal+)
