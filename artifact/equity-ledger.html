@@ -515,7 +515,7 @@ function buildSummary(state) {
     taxWrapperAllocation: slices(wrapperTotals, (_k, i) => palette[i % palette.length]).map((s) => ({ ...s, label: s.key })),
     riskLevel, lastUpdated: lastUpdated ? new Date(lastUpdated).toISOString() : null,
     marketStatus: failures.length ? 'partial' : 'current', marketFailures: failures,
-    fxRates: ['USD', 'EUR'].map((c) => ({ currency: c, rateToGbp: fx[c], timestamp: state.fx?.[c]?.updatedAt || null, status: 'reference', error: null })),
+    fxRates: ['USD', 'EUR'].map((c) => ({ currency: c, rateToGbp: fx[c], timestamp: state.fx?.[c]?.updatedAt || null, status: state.fx?.[c]?.source ? 'live' : 'reference', source: state.fx?.[c]?.source || null, error: null })),
   };
 }
 
@@ -1005,6 +1005,7 @@ async function refreshMarket({ manual = false } = {}) {
   try {
     try { market.radar = await fetchCmcRadar(); market.radarAt = new Date().toISOString(); market.radarError = null; store.set('el.mcp', '1'); }
     catch (e) { market.radarError = `CoinMarketCap: ${mcpErrorText(e)}`; }
+    await refreshFx({ force: manual });
     if (revxSynced()) await syncRevolut();
     const fx = fxToGbp(state);
     const live = state.holdings.filter((h) => !isManuallyValued(h) && h.source !== 'revolut_x');
@@ -1037,10 +1038,10 @@ const revxSynced = () => state.holdings.some((h) => h.source === 'revolut_x') ||
 function revxErrorText(e) {
   switch (e?.code) {
     case 'not_in_manifest': case 'not_granted': case 'approval_required': case 'capability_disabled':
-      return 'This page has not been allowed to use your Revolut X connector. Open Permissions, switch Revolut X on, then press Link Revolut X again.';
-    case 'server_not_connected': case 'server_not_found': return 'Revolut X is not connected for you. Connect it in claude.ai Settings → Connectors, then press Link Revolut X again.';
+      return 'This page has not been allowed to use your Revolut X connector. Open Permissions, switch Revolut X on, then try again.';
+    case 'server_not_connected': case 'server_not_found': return 'Revolut X is not connected for you. Connect it in claude.ai Settings → Connectors, then try again.';
     case 'needs_reauth': return 'Revolut X needs reconnecting in claude.ai Settings → Connectors.';
-    case 'selection_required': return 'You have more than one Revolut X connector. Choose one when claude.ai asks, then press Link Revolut X again.';
+    case 'selection_required': return 'You have more than one Revolut X connector. Choose one when claude.ai asks, then try again.';
     case 'blocked_by_policy': return 'Your organization blocks Revolut X for this page.';
     case 'server_unavailable': return 'Revolut X did not answer. Try again in a minute.';
     case 'rate_limited': return 'Revolut X is rate-limiting requests. Try again in a minute.';
@@ -1065,8 +1066,10 @@ function revxAccount() {
 }
 // One call for every pair: naming a pair Revolut X does not list fails the whole request.
 async function revxTickers() {
+  if (revx.tickers && Date.now() - revx.tickersAt < 60_000) return revx.tickers;
   const rows = revxData(await caps.mcp.callTool(REVX_SERVER, 'revx_get_tickers', {}));
-  return new Map((Array.isArray(rows) ? rows : []).map((t) => [t.symbol, t]));
+  revx.tickers = new Map((Array.isArray(rows) ? rows : []).map((t) => [t.symbol, t])); revx.tickersAt = Date.now();
+  return revx.tickers;
 }
 // Price in GBP from the GBP pair, else the USD pair converted at the ledger's FX rate.
 function revxQuote(code, tickers, fx) {
@@ -1133,10 +1136,44 @@ async function syncRevolut({ manual = false } = {}) {
     return false;
   } finally { revx.syncing = false; render(); }
 }
+/* FX: sterling rates tracked from market data, never typed in. USD→GBP is the median of the
+   Revolut X cross rates (USDC, USDT and BTC quoted in both GBP and USD); EUR→GBP is
+   CoinMarketCap's price of EURC (a fully reserved euro stablecoin) in USD times that rate. */
+const FX_MAX_AGE_MS = 30 * 60_000;
+const EURC_CMC_ID = '20641';
+const fxUi = { loading: false, error: null };
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+function usdGbpFromTickers(tickers) {
+  const px = (sym) => { const t = tickers.get(sym); return Number(t?.mid) || Number(t?.last_price) || 0; };
+  const crosses = ['USDC', 'USDT', 'BTC'].map((c) => { const g = px(`${c}/GBP`); const u = px(`${c}/USD`); return g > 0 && u > 0 ? g / u : null; }).filter((r) => r > 0.4 && r < 1.5);
+  return crosses.length ? median(crosses) : null;
+}
+const fxIsTracked = (c) => Boolean(state.fx?.[c]?.source);
+async function refreshFx({ force = false } = {}) {
+  if (!caps.mcp || fxUi.loading) return false;
+  const fresh = ['USD', 'EUR'].every((c) => fxIsTracked(c) && Date.now() - new Date(state.fx[c].updatedAt).getTime() < FX_MAX_AGE_MS);
+  if (fresh && !force) return false;
+  fxUi.loading = true;
+  const errors = []; const now = new Date().toISOString(); let usd = null; let eurUsd = null;
+  try {
+    try { usd = usdGbpFromTickers(await revxTickers()); if (!usd) errors.push('Revolut X returned no matching GBP and USD prices.'); }
+    catch (e) { errors.push(`USD rate: ${revxErrorText(e)}`); }
+    try {
+      const p = Number(cmcRows(await caps.mcp.callTool(CMC_SERVER, 'get_crypto_quotes_latest', { id: EURC_CMC_ID }))[0]?.price);
+      if (p > 0.5 && p < 2) eurUsd = p; else errors.push('EUR rate: CoinMarketCap returned no EURC price.');
+    } catch (e) { errors.push(`EUR rate: CoinMarketCap ${mcpErrorText(e)}`); }
+    if (usd) state.fx.USD = { rate: round(usd, 6), updatedAt: now, source: 'Revolut X' };
+    const usdRate = fxIsTracked('USD') ? Number(state.fx.USD.rate) : null;
+    if (eurUsd && usdRate) state.fx.EUR = { rate: round(eurUsd * usdRate, 6), updatedAt: now, source: 'CoinMarketCap and Revolut X' };
+    fxUi.error = errors.length ? errors.join(' ') : null;
+    if (usd || (eurUsd && usdRate)) { save(); return true; }
+    return false;
+  } finally { fxUi.loading = false; }
+}
 const isFatalMcp = (e) => ['not_granted', 'not_in_manifest', 'server_not_connected', 'needs_reauth', 'blocked_by_policy', 'capability_disabled', 'revoked'].includes(e?.code);
 function mcpErrorText(e) {
   switch (e?.code) {
-    case 'not_granted': return 'access was not allowed for this page.';
+    case 'not_granted': case 'not_in_manifest': case 'approval_required': return 'access was not allowed for this page.';
     case 'server_not_connected': case 'server_not_found': return 'not connected in your claude.ai connectors.';
     case 'needs_reauth': return 'needs reconnecting in your claude.ai connectors.';
     case 'tool_error': return 'no USD market for this symbol.';
@@ -1274,11 +1311,16 @@ function activityList(items) {
 }
 function marketStatusBar(summary) {
   const fx = summary.fxRates.map((r) => `${r.currency}/GBP ${r.rateToGbp.toFixed(4)}`).join(' · ');
-  const live = state.holdings.filter((h) => !isManuallyValued(h)).length;
+  const tracked = summary.fxRates.filter((r) => r.status === 'live');
+  const fxAt = tracked.map((r) => r.timestamp).sort()[0];
+  const fxNote = tracked.length === 2 ? `tracked from Revolut X and CoinMarketCap, ${relTime(fxAt)}` : tracked.length ? `${tracked.map((r) => r.currency).join(', ')} tracked automatically; the other is a starting estimate` : 'starting estimates until the first automatic update';
+  const liveHoldings = state.holdings.filter((h) => !isManuallyValued(h));
+  const sources = [...new Set(liveHoldings.map((h) => h.priceSource || 'CoinMarketCap'))].join(' and ');
   const fail = summary.marketFailures.length;
-  return `<div class="market-status ${fail ? 'warning' : ''}">${icon(fail ? 'info' : 'coins')}
-    <span>${live ? `${live} crypto holding${live > 1 ? 's' : ''} priced live from CoinMarketCap${summary.lastUpdated ? `, last update ${relTime(summary.lastUpdated)}` : ''}.` : 'All holdings use prices you enter.'} FX reference rates: ${fx}.${fail ? ` ${fail} quote${fail > 1 ? 's' : ''} failed: ${esc(summary.marketFailures.join('; '))}.` : ''}</span>
-    <button class="button button-secondary" data-action="edit-fx" style="margin-left:auto;padding:7px 11px">Set FX rates</button></div>`;
+  const warn = fail || fxUi.error || tracked.length < 2;
+  return `<div class="market-status ${warn ? 'warning' : ''}">${icon(warn ? 'info' : 'coins')}
+    <span>${liveHoldings.length ? `${liveHoldings.length} crypto holding${liveHoldings.length > 1 ? 's' : ''} priced live from ${esc(sources)}${summary.lastUpdated ? `, last update ${relTime(summary.lastUpdated)}` : ''}.` : 'All holdings use prices you enter.'} FX: ${fx}, ${fxNote}.${fxUi.error ? ` ${esc(fxUi.error)}` : ''}${fail ? ` ${fail} quote${fail > 1 ? 's' : ''} failed: ${esc(summary.marketFailures.join('; '))}.` : ''}</span>
+    <button class="button button-secondary" data-action="refresh-fx" style="margin-left:auto;padding:7px 11px" ${fxUi.loading ? 'disabled' : ''}>${icon('refresh')}${fxUi.loading ? 'Updating…' : 'Update FX'}</button></div>`;
 }
 
 function debtPayoffPanel() {
@@ -1362,7 +1404,7 @@ function holdingsView(s) {
     ${state.accounts.length ? `<div class="account-grid">${accounts}</div>` : '<p class="panel-kicker" style="margin:-4px 0 22px">Group holdings by ISA, pension or broker account to see tax-wrapper exposure.</p>'}
     <div class="section-heading"><h2>Positions</h2></div>
     <div class="panel">${rows ? `<div class="table-wrap"><table><thead><tr><th>Holding</th><th>Class</th><th>Account</th><th class="r">Units</th><th class="r">Price</th><th class="r">Value</th><th class="r">Day</th><th class="r">Yield</th><th>Price</th><th><span hidden>Actions</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
-      : emptyBlock('holdings', 'No holdings yet', 'Add a fund, share, crypto asset or cash balance. Values are normalised to GBP using your reference FX rates.', `<button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button><button class="button button-secondary" data-action="load-examples">Load example portfolio</button>`)}</div>`;
+      : emptyBlock('holdings', 'No holdings yet', 'Add a fund, share, crypto asset or cash balance. Values are normalised to GBP using automatically tracked FX rates.', `<button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button><button class="button button-secondary" data-action="load-examples">Load example portfolio</button>`)}</div>`;
 }
 
 function liabilitiesView(s) {
@@ -1798,18 +1840,6 @@ function scheduleForm(sc) {
   const sync = () => { const t = modalEl.querySelector('#s-type').value; modalEl.querySelector('#s-holding-wrap').hidden = t !== 'asset_purchase'; modalEl.querySelector('#s-liab-wrap').hidden = t !== 'liability_payment'; };
   modalEl.querySelector('#s-type').addEventListener('change', sync); sync();
 }
-function fxForm() {
-  openModal(formShell('FX reference rates', 'Used to normalise USD and EUR values to sterling. Live GBP rates aren’t available here, so set them from your bank or broker.',
-    field('fx-usd', 'USD → GBP', `<input id="fx-usd" type="number" min="0.01" step="0.0001" required value="${fxToGbp(state).USD}">`) +
-    field('fx-eur', 'EUR → GBP', `<input id="fx-eur" type="number" min="0.01" step="0.0001" required value="${fxToGbp(state).EUR}">`), 'Save rates'), (f) => {
-    const usd = Number(val(f, 'fx-usd')); const eur = Number(val(f, 'fx-eur'));
-    if (!(usd > 0) || !(eur > 0)) return 'Rates must be greater than zero.';
-    const now = new Date().toISOString();
-    state.fx = { USD: { rate: usd, updatedAt: now }, EUR: { rate: eur, updatedAt: now } };
-    logActivity(state, 'Currency rates updated', `USD/GBP ${usd} · EUR/GBP ${eur}`, 'market');
-    save(); render(); toast('FX rates saved.');
-  });
-}
 function confirmModal(title, text, confirmLabel, onConfirm) {
   openModal(`<form novalidate><h2 class="modal-title">${title}</h2><p class="modal-desc">${text}</p><div class="form-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-danger">${confirmLabel}</button></div></form>`, () => { onConfirm(); });
 }
@@ -1918,7 +1948,11 @@ document.addEventListener('click', async (e) => {
     case 'delete-schedule': confirmModal('Delete this schedule?', 'Past applications stay in your ledger; future ones stop.', 'Delete schedule', () => { state.schedules = state.schedules.filter((x) => x.id !== id); save(); render(); toast('Schedule deleted.'); }); break;
     case 'process-schedules': { const r = processDueSchedules(state); if (r.applied || r.failed) save(); render(); toast(`${r.applied} applied, ${r.failed} failed${r.applied + r.failed === 0 ? ' — nothing was due' : ''}.`); break; }
     case 'ack-alert': { const a = find(state.alerts); if (a) { a.acknowledgedAt = new Date().toISOString(); save(); render(); } break; }
-    case 'edit-fx': fxForm(); break;
+    case 'refresh-fx': {
+      e.preventDefault();
+      if (!caps.mcp) { toast('FX rates update from your Revolut X and CoinMarketCap connectors, which this view cannot use.'); break; }
+      const p = refreshFx({ force: true }); render(); const ok = await p; render();
+      toast(ok && !fxUi.error ? 'FX rates updated.' : fxUi.error || 'FX rates could not be updated.'); break; }
     case 'sample-q': advisorUi.question = el.dataset.q; document.getElementById('ask-input').value = el.dataset.q; ask(el.dataset.q); break;
     case 'stop-ask': advisorUi.ctl?.abort(); break;
     case 'run-review': runReview(); break;
@@ -1985,5 +2019,7 @@ function toast(message) {
     if (!modalEl && route() === 'news') render();
   }, () => { briefingUi.loaded = true; });
   if (caps.mcp && (store.get('el.mcp') === '1' || revxSynced())) refreshMarket();
+  else if (caps.mcp) refreshFx().then((ok) => { if (ok && !modalEl) render(); });
+  setInterval(() => { if (caps.mcp && !document.hidden && !market.refreshing) refreshFx().then((ok) => { if (ok && !modalEl) render(); }); }, FX_MAX_AGE_MS);
 })();
 </script>
