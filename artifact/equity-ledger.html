@@ -1005,8 +1005,9 @@ async function refreshMarket({ manual = false } = {}) {
   try {
     try { market.radar = await fetchCmcRadar(); market.radarAt = new Date().toISOString(); market.radarError = null; store.set('el.mcp', '1'); }
     catch (e) { market.radarError = `CoinMarketCap: ${mcpErrorText(e)}`; }
+    if (revxSynced()) await syncRevolut();
     const fx = fxToGbp(state);
-    const live = state.holdings.filter((h) => !isManuallyValued(h));
+    const live = state.holdings.filter((h) => !isManuallyValued(h) && h.source !== 'revolut_x');
     for (const h of live) {
       try {
         const sym = h.ticker.toUpperCase().split('-')[0];
@@ -1026,6 +1027,86 @@ async function refreshMarket({ manual = false } = {}) {
     market.radarError = mcpErrorText(e);
     if (manual) toast(market.radarError);
   } finally { market.refreshing = false; render(); }
+}
+/* Revolut X: account balances become crypto holdings in a "Revolut X" account, priced from Revolut X GBP markets. */
+const REVX_SERVER = 'Revolut X';
+const REVX_MIN_GBP = 1; // balances worth less than £1 are dust and are left out
+const revx = { syncing: false, error: null };
+const revxData = (res) => { const p = payloadOf(res); return p && 'data' in p ? p.data : p; };
+const revxSynced = () => state.holdings.some((h) => h.source === 'revolut_x') || state.accounts.some((a) => a.source === 'revolut_x');
+function revxAccount() {
+  let a = state.accounts.find((x) => x.source === 'revolut_x');
+  if (!a) {
+    a = { id: newId(), name: 'Revolut X', provider: 'Revolut', accountType: 'crypto_accounts', classification: 'crypto_account', baseCurrency: 'GBP', managementStyle: 'self_directed', riskAppetite: 'growth', accountReference: null, source: 'revolut_x', createdAt: new Date().toISOString() };
+    state.accounts.push(a);
+  }
+  return a;
+}
+// One call for every pair: naming a pair Revolut X does not list fails the whole request.
+async function revxTickers() {
+  const rows = revxData(await caps.mcp.callTool(REVX_SERVER, 'revx_get_tickers', {}));
+  return new Map((Array.isArray(rows) ? rows : []).map((t) => [t.symbol, t]));
+}
+// Price in GBP from the GBP pair, else the USD pair converted at the ledger's FX rate.
+function revxQuote(code, tickers, fx) {
+  for (const [quote, rate] of [['GBP', 1], ['USD', fx.USD]]) {
+    const t = tickers.get(`${code}/${quote}`);
+    const last = Number(t?.last_price) || Number(t?.mid) || Number(t?.index_price);
+    if (last > 0) {
+      const ch = Number(t.price_change_24h); const prev = last - ch;
+      return { price: last * rate, dayChange: Number.isFinite(ch) && prev > 0 ? (ch / prev) * 100 : 0 };
+    }
+  }
+  return null;
+}
+async function syncRevolut({ manual = false } = {}) {
+  if (!caps.mcp) { if (manual) toast('Revolut X is not available in this view.'); return false; }
+  if (revx.syncing) return false;
+  revx.syncing = true; if (manual) render();
+  try {
+    const rows = revxData(await caps.mcp.callTool(REVX_SERVER, 'revx_get_balances', {}));
+    const balances = (Array.isArray(rows) ? rows : [])
+      .map((b) => ({ code: String(b.currency || '').toUpperCase(), units: (Number(b.total) || 0) + (Number(b.staked) || 0) }))
+      .filter((b) => b.code && b.units > 0 && !['GBP', 'USD', 'EUR'].includes(b.code));
+    const tickers = balances.length ? await revxTickers() : new Map();
+    const fx = fxToGbp(state); const now = new Date().toISOString();
+    const priced = balances.map((b) => ({ ...b, q: revxQuote(b.code, tickers, fx) })).filter((b) => !b.q || b.units * b.q.price >= REVX_MIN_GBP);
+    const account = revxAccount();
+    const mine = (code) => state.holdings.find((h) => h.source === 'revolut_x' && h.ticker === code)
+      || state.holdings.find((h) => h.assetClass === 'crypto' && h.ticker.toUpperCase() === code && (h.accountId === account.id || !h.accountId));
+    let names = null; let added = 0; let changed = 0;
+    for (const b of priced) {
+      let h = mine(b.code);
+      if (!h) {
+        if (!names) { try { names = revxData(await caps.mcp.callTool(REVX_SERVER, 'revx_get_currencies', {})) || {}; } catch { names = {}; } }
+        h = { id: newId(), ticker: b.code, name: names[b.code]?.name || b.code, assetClass: 'crypto', currency: 'GBP', units: 0, price: b.q ? Number(b.q.price.toPrecision(10)) : 0, referencePrice: b.q ? Number(b.q.price.toPrecision(10)) : 0, dividendYield: 0, theme: 'Crypto', fundType: null, fundStrategy: null, upperAlertPercent: null, lowerAlertPercent: null, dayChange: 0, priceUpdatedAt: null, priceError: null, createdAt: now };
+        state.holdings.push(h); added += 1;
+      } else if (Math.abs(Number(h.units) - b.units) > 1e-9) changed += 1;
+      Object.assign(h, { units: b.units, accountId: account.id, source: 'revolut_x', pricingMethod: 'live', currency: 'GBP', updatedAt: now });
+      if (b.q) Object.assign(h, { price: Number(b.q.price.toPrecision(10)), dayChange: round(b.q.dayChange, 4), priceUpdatedAt: now, priceSource: 'Revolut X', priceError: null });
+      else h.priceError = 'No Revolut X GBP or USD market.';
+      evaluateAlerts(state, h);
+    }
+    // Coins sold or moved out of Revolut X leave the ledger; ones with recurring purchases stay at zero units.
+    const held = new Set(priced.map((b) => b.code)); const gone = [];
+    state.holdings = state.holdings.filter((h) => {
+      if (h.source !== 'revolut_x' || held.has(h.ticker)) return true;
+      gone.push(h.ticker);
+      if (state.schedules.some((s) => s.holdingId === h.id)) { h.units = 0; return true; }
+      state.alerts = state.alerts.filter((a) => a.holdingId !== h.id); return false;
+    });
+    Object.assign(account, { syncedAt: now, syncError: null });
+    if (added || changed || gone.length || manual) logActivity(state, 'Revolut X synced', `${priced.length} crypto balances${added ? ` · ${added} added` : ''}${changed ? ` · ${changed} changed` : ''}${gone.length ? ` · ${gone.join(', ')} no longer held` : ''}`, 'market');
+    revx.error = null; store.set('el.revx', '1');
+    save();
+    if (manual) toast(`Revolut X synced: ${priced.length} crypto ${priced.length === 1 ? 'holding' : 'holdings'}.`);
+    return true;
+  } catch (e) {
+    revx.error = `Revolut X: ${mcpErrorText(e)}`;
+    const a = state.accounts.find((x) => x.source === 'revolut_x'); if (a) a.syncError = revx.error;
+    if (manual) toast(revx.error);
+    return false;
+  } finally { revx.syncing = false; render(); }
 }
 const isFatalMcp = (e) => ['not_granted', 'not_in_manifest', 'server_not_connected', 'needs_reauth', 'blocked_by_policy', 'capability_disabled', 'revoked'].includes(e?.code);
 function mcpErrorText(e) {
@@ -1232,11 +1313,11 @@ function holdingsView(s) {
     const acc = h.accountId ? accountMap.get(h.accountId) : null;
     const st = h.priceStatus;
     return `<tr class="data-row">
-      <td><div class="ticker-cell"><span class="ticker-mark">${esc(h.ticker.slice(0, 4))}</span><div><strong>${esc(h.name)}</strong><span>${esc(h.ticker)}${h.theme ? ` · ${esc(h.theme)}` : ''}</span></div></div></td>
+      <td><div class="ticker-cell"><span class="ticker-mark">${esc(h.ticker.slice(0, 4))}</span><div><strong>${esc(h.name)}</strong><span>${esc(h.ticker)}${h.theme ? ` · ${esc(h.theme)}` : ''}${h.source === 'revolut_x' ? ' · Revolut X' : ''}</span></div></div></td>
       <td><span class="tag">${esc(ASSET_CLASSES[h.assetClass] || h.assetClass)}</span></td>
       <td>${acc ? esc(acc.name) : '<span class="panel-kicker">Unassigned</span>'}</td>
       <td class="r mono">${units(h.units)}</td>
-      <td class="r mono">${money(h.price, h.currency, Number(h.price) < 10 ? 4 : 2)}<span class="price-source">${st === 'live' ? `${esc(h.priceSource || 'CoinMarketCap')} · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
+      <td class="r mono">${money(h.price, h.currency, Number(h.price) < 0.01 && Number(h.price) > 0 ? Math.min(12, 3 - Math.floor(Math.log10(Number(h.price)))) : Number(h.price) < 10 ? 4 : 2)}<span class="price-source">${st === 'live' ? `${esc(h.priceSource || 'CoinMarketCap')} · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
       <td class="r mono">${gbp(h.valueGbp, 2)}</td>
       <td class="r mono ${Number(h.dayChange) > 0 ? 'positive' : Number(h.dayChange) < 0 ? 'negative' : ''}">${signedPct(Number(h.dayChange))}</td>
       <td class="r mono">${pct(h.dividendYield, 2)}</td>
@@ -1246,9 +1327,11 @@ function holdingsView(s) {
   }).join('');
   const accounts = state.accounts.map((a) => `<div class="account-card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><span class="tag">${esc(CLASSIFICATION_LABELS[a.classification] || ACCOUNT_TYPE_LABELS[a.accountType])}</span><div class="row-actions"><button class="button button-icon" data-action="edit-account" data-id="${a.id}" aria-label="Edit ${esc(a.name)}">${icon('edit')}</button><button class="button button-icon" data-action="delete-account" data-id="${a.id}" aria-label="Delete ${esc(a.name)}">${icon('trash')}</button></div></div>
     <h3>${esc(a.name)}</h3><p>${esc(a.provider)} · ${esc(a.baseCurrency)} · ${esc(MANAGEMENT_STYLES[a.managementStyle] || a.managementStyle)} · ${esc(RISK_APPETITES[a.riskAppetite] || a.riskAppetite)}</p>
+    ${a.source === 'revolut_x' ? `<p class="price-source" style="margin-top:6px">${a.syncedAt ? `Synced from Revolut X · ${relTime(a.syncedAt)}` : 'Linked to Revolut X'}</p>` : ''}
     <div class="account-value"><span class="stat-label">Value</span><strong>${gbp(accountValue.get(a.id) || 0)}</strong></div></div>`).join('');
-  return pageHeading('Holdings', 'What you own.', 'Equities, funds, commodities, cash and crypto. Crypto can be priced live from CoinMarketCap; everything else uses the price you enter.',
-    `<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh prices'}</button><button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button>`) +
+  return pageHeading('Holdings', 'What you own.', 'Equities, funds, commodities, cash and crypto. Revolut X balances sync in automatically; other crypto is priced live from CoinMarketCap; everything else uses the price you enter.',
+    `${caps.mcp ? `<button class="button button-secondary" data-action="sync-revx" ${revx.syncing ? 'disabled' : ''}>${icon('wallet')}${revx.syncing ? 'Syncing…' : revxSynced() ? 'Sync Revolut X' : 'Link Revolut X'}</button>` : ''}<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh prices'}</button><button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button>`) +
+    (revx.error ? `<div class="market-status warning">${icon('info')}<span>${esc(revx.error)} Your last synced balances are still shown.</span></div>` : '') +
     exampleBanner() +
     `<div class="section-heading"><h2>Investment accounts</h2><button class="button button-secondary" data-action="add-account">${icon('plus')}Add account</button></div>
     ${state.accounts.length ? `<div class="account-grid">${accounts}</div>` : '<p class="panel-kicker" style="margin:-4px 0 22px">Group holdings by ISA, pension or broker account to see tax-wrapper exposure.</p>'}
@@ -1566,7 +1649,7 @@ function holdingForm(h) {
     field('h-name', 'Name', `<input id="h-name" required maxlength="120" value="${esc(h.name || '')}" placeholder="Vanguard FTSE All-World">`) +
     field('h-class', 'Asset class', `<select id="h-class">${opt(ASSET_CLASSES, h.assetClass)}</select>`) +
     field('h-currency', 'Currency', `<select id="h-currency">${['GBP', 'USD', 'EUR'].map((c) => `<option ${c === h.currency ? 'selected' : ''}>${c}</option>`).join('')}</select>`) +
-    field('h-units', 'Units', `<input id="h-units" type="number" min="0" step="any" required value="${h.units ?? ''}">`) +
+    field('h-units', 'Units', `<input id="h-units" type="number" min="0" step="any" required value="${h.units ?? ''}">`, false, h.source === 'revolut_x' ? 'Synced from Revolut X: units and price are replaced on every sync.' : '') +
     field('h-price', 'Price per unit', `<input id="h-price" type="number" min="0" step="any" required value="${h.price ?? ''}">`, false, 'For crypto on live pricing, this is replaced on the next refresh.') +
     field('h-pricing', 'Crypto pricing', `<select id="h-pricing"><option value="live" ${h.pricingMethod !== 'manual' ? 'selected' : ''}>Live from CoinMarketCap</option><option value="manual" ${h.pricingMethod === 'manual' ? 'selected' : ''}>Entered by me</option></select>`) +
     field('h-yield', 'Dividend yield %', `<input id="h-yield" type="number" min="0" max="100" step="0.01" value="${h.dividendYield ?? 0}">`) +
@@ -1784,16 +1867,18 @@ document.addEventListener('click', async (e) => {
   switch (action) {
     case 'close-modal': closeModal(); break;
     case 'refresh': e.preventDefault(); refreshMarket({ manual: true }); break;
+    case 'sync-revx': e.preventDefault(); syncRevolut({ manual: true }); break;
     case 'retry-price': { const h = find(state.holdings); if (!h) break; market.lastRefreshAt = 0; await refreshMarket({ manual: true }); break; }
     case 'add-holding': e.preventDefault(); if (route() !== 'holdings') location.hash = 'holdings'; setTimeout(() => holdingForm(null), 0); break;
     case 'edit-holding': holdingForm(find(state.holdings)); break;
-    case 'delete-holding': { const h = find(state.holdings); confirmModal(`Delete ${esc(h.ticker)}?`, 'The holding, its price alerts and any recurring purchases into it will be removed.', 'Delete holding', () => {
+    case 'delete-holding': { const h = find(state.holdings); confirmModal(`Delete ${esc(h.ticker)}?`, `The holding, its price alerts and any recurring purchases into it will be removed.${h.source === 'revolut_x' ? ' It comes back on the next Revolut X sync while you still hold it there.' : ''}`, 'Delete holding', () => {
       state.holdings = state.holdings.filter((x) => x.id !== id); state.schedules = state.schedules.filter((s) => s.holdingId !== id); state.alerts = state.alerts.filter((a) => a.holdingId !== id);
       logActivity(state, 'Holding removed', h.ticker, 'holding'); save(); render(); toast('Holding deleted.'); }); break; }
     case 'add-account': accountForm(null); break;
     case 'edit-account': accountForm(find(state.accounts)); break;
-    case 'delete-account': { const a = find(state.accounts); confirmModal(`Delete ${esc(a.name)}?`, 'Holdings in this account stay in your ledger and become unassigned.', 'Delete account', () => {
-      state.accounts = state.accounts.filter((x) => x.id !== id); state.holdings.forEach((h) => { if (h.accountId === id) h.accountId = null; });
+    case 'delete-account': { const a = find(state.accounts); confirmModal(`Delete ${esc(a.name)}?`, a.source === 'revolut_x' ? 'This unlinks Revolut X. Its holdings stay in your ledger, unassigned, and stop syncing; their prices then come from CoinMarketCap.' : 'Holdings in this account stay in your ledger and become unassigned.', 'Delete account', () => {
+      state.accounts = state.accounts.filter((x) => x.id !== id); state.holdings.forEach((h) => { if (h.accountId === id) h.accountId = null; if (a.source === 'revolut_x' && h.source === 'revolut_x') { h.source = null; h.priceSource = null; } });
+      if (a.source === 'revolut_x') { store.set('el.revx', '0'); revx.error = null; }
       logActivity(state, 'Account removed', a.name, 'account'); save(); render(); toast('Account deleted.'); }); break; }
     case 'add-liability': liabilityForm(null); break;
     case 'edit-liability': liabilityForm(find(state.liabilities)); break;
@@ -1873,6 +1958,6 @@ function toast(message) {
     briefingUi.loaded = true; briefingUi.doc = d.exists ? d.data() : null;
     if (!modalEl && route() === 'news') render();
   }, () => { briefingUi.loaded = true; });
-  if (store.get('el.mcp') === '1' && caps.mcp) refreshMarket();
+  if (caps.mcp && (store.get('el.mcp') === '1' || revxSynced())) refreshMarket();
 })();
 </script>
