@@ -1031,12 +1031,33 @@ async function refreshMarket({ manual = false } = {}) {
 /* Revolut X: account balances become crypto holdings in a "Revolut X" account, priced from Revolut X GBP markets. */
 const REVX_SERVER = 'Revolut X';
 const REVX_MIN_GBP = 1; // balances worth less than £1 are dust and are left out
-const revx = { syncing: false, error: null };
+const revx = { syncing: false, error: null, needsPermission: false };
 const revxData = (res) => { const p = payloadOf(res); return p && 'data' in p ? p.data : p; };
 const revxSynced = () => state.holdings.some((h) => h.source === 'revolut_x') || state.accounts.some((a) => a.source === 'revolut_x');
+function revxErrorText(e) {
+  switch (e?.code) {
+    case 'not_in_manifest': case 'not_granted': case 'approval_required': case 'capability_disabled':
+      return 'This page has not been allowed to use your Revolut X connector. Open Permissions, switch Revolut X on, then press Link Revolut X again.';
+    case 'server_not_connected': case 'server_not_found': return 'Revolut X is not connected for you. Connect it in claude.ai Settings → Connectors, then press Link Revolut X again.';
+    case 'needs_reauth': return 'Revolut X needs reconnecting in claude.ai Settings → Connectors.';
+    case 'selection_required': return 'You have more than one Revolut X connector. Choose one when claude.ai asks, then press Link Revolut X again.';
+    case 'blocked_by_policy': return 'Your organization blocks Revolut X for this page.';
+    case 'server_unavailable': return 'Revolut X did not answer. Try again in a minute.';
+    case 'rate_limited': return 'Revolut X is rate-limiting requests. Try again in a minute.';
+    default: return `Revolut X could not be reached${e?.code ? ` (${e.code})` : ''}${e?.message ? `: ${e.message}` : '.'}`;
+  }
+}
+const revxNeedsPermission = (e) => ['not_in_manifest', 'not_granted', 'approval_required', 'capability_disabled'].includes(e?.code);
+async function openPermissions() {
+  const perms = window.claude?.use ? await window.claude.use('permissions').catch(() => null) : null;
+  try { if (!perms) throw new Error('unavailable'); await perms.manage(); syncRevolut({ manual: true }); }
+  catch { toast('Open this artifact’s Permissions menu in claude.ai and switch Revolut X on.'); }
+}
 function revxAccount() {
-  let a = state.accounts.find((x) => x.source === 'revolut_x');
-  if (!a) {
+  let a = state.accounts.find((x) => x.source === 'revolut_x')
+    || state.accounts.find((x) => x.classification === 'crypto_account' && /revolut/i.test(`${x.name} ${x.provider}`));
+  if (a) a.source = 'revolut_x';
+  else {
     a = { id: newId(), name: 'Revolut X', provider: 'Revolut', accountType: 'crypto_accounts', classification: 'crypto_account', baseCurrency: 'GBP', managementStyle: 'self_directed', riskAppetite: 'growth', accountReference: null, source: 'revolut_x', createdAt: new Date().toISOString() };
     state.accounts.push(a);
   }
@@ -1060,8 +1081,12 @@ function revxQuote(code, tickers, fx) {
   return null;
 }
 async function syncRevolut({ manual = false } = {}) {
-  if (!caps.mcp) { if (manual) toast('Revolut X is not available in this view.'); return false; }
   if (revx.syncing) return false;
+  if (!caps.mcp && window.claude?.use) caps.mcp = await window.claude.use('mcp').catch(() => null);
+  if (!caps.mcp) {
+    if (manual) { revx.error = 'Connectors are not available to this page yet. Open Permissions and allow connectors (Revolut X), then press Link Revolut X again.'; revx.needsPermission = true; toast('Revolut X needs permission for this page.'); render(); }
+    return false;
+  }
   revx.syncing = true; if (manual) render();
   try {
     const rows = revxData(await caps.mcp.callTool(REVX_SERVER, 'revx_get_balances', {}));
@@ -1097,14 +1122,14 @@ async function syncRevolut({ manual = false } = {}) {
     });
     Object.assign(account, { syncedAt: now, syncError: null });
     if (added || changed || gone.length || manual) logActivity(state, 'Revolut X synced', `${priced.length} crypto balances${added ? ` · ${added} added` : ''}${changed ? ` · ${changed} changed` : ''}${gone.length ? ` · ${gone.join(', ')} no longer held` : ''}`, 'market');
-    revx.error = null; store.set('el.revx', '1');
+    revx.error = null; revx.needsPermission = false; store.set('el.revx', '1');
     save();
     if (manual) toast(`Revolut X synced: ${priced.length} crypto ${priced.length === 1 ? 'holding' : 'holdings'}.`);
     return true;
   } catch (e) {
-    revx.error = `Revolut X: ${mcpErrorText(e)}`;
-    const a = state.accounts.find((x) => x.source === 'revolut_x'); if (a) a.syncError = revx.error;
-    if (manual) toast(revx.error);
+    revx.error = revxErrorText(e); revx.needsPermission = revxNeedsPermission(e);
+    const a = state.accounts.find((x) => x.source === 'revolut_x'); if (a) { a.syncError = revx.error; a.syncErrorAt = new Date().toISOString(); save(); }
+    if (manual) toast(revx.needsPermission ? 'Revolut X needs permission for this page.' : revx.error);
     return false;
   } finally { revx.syncing = false; render(); }
 }
@@ -1327,11 +1352,11 @@ function holdingsView(s) {
   }).join('');
   const accounts = state.accounts.map((a) => `<div class="account-card"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><span class="tag">${esc(CLASSIFICATION_LABELS[a.classification] || ACCOUNT_TYPE_LABELS[a.accountType])}</span><div class="row-actions"><button class="button button-icon" data-action="edit-account" data-id="${a.id}" aria-label="Edit ${esc(a.name)}">${icon('edit')}</button><button class="button button-icon" data-action="delete-account" data-id="${a.id}" aria-label="Delete ${esc(a.name)}">${icon('trash')}</button></div></div>
     <h3>${esc(a.name)}</h3><p>${esc(a.provider)} · ${esc(a.baseCurrency)} · ${esc(MANAGEMENT_STYLES[a.managementStyle] || a.managementStyle)} · ${esc(RISK_APPETITES[a.riskAppetite] || a.riskAppetite)}</p>
-    ${a.source === 'revolut_x' ? `<p class="price-source" style="margin-top:6px">${a.syncedAt ? `Synced from Revolut X · ${relTime(a.syncedAt)}` : 'Linked to Revolut X'}</p>` : ''}
+    ${a.source === 'revolut_x' || (a.classification === 'crypto_account' && /revolut/i.test(`${a.name} ${a.provider}`)) ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px"><span class="price-source" style="margin:0">${a.syncedAt ? `Revolut X · synced ${relTime(a.syncedAt)}` : 'Revolut X · not linked yet'}</span><button class="button button-secondary" style="padding:7px 10px" data-action="sync-revx" ${revx.syncing ? 'disabled' : ''}>${icon('wallet')}${revx.syncing ? 'Syncing…' : a.syncedAt ? 'Sync' : 'Link Revolut X'}</button></div>` : ''}
     <div class="account-value"><span class="stat-label">Value</span><strong>${gbp(accountValue.get(a.id) || 0)}</strong></div></div>`).join('');
   return pageHeading('Holdings', 'What you own.', 'Equities, funds, commodities, cash and crypto. Revolut X balances sync in automatically; other crypto is priced live from CoinMarketCap; everything else uses the price you enter.',
-    `${caps.mcp ? `<button class="button button-secondary" data-action="sync-revx" ${revx.syncing ? 'disabled' : ''}>${icon('wallet')}${revx.syncing ? 'Syncing…' : revxSynced() ? 'Sync Revolut X' : 'Link Revolut X'}</button>` : ''}<button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh prices'}</button><button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button>`) +
-    (revx.error ? `<div class="market-status warning">${icon('info')}<span>${esc(revx.error)} Your last synced balances are still shown.</span></div>` : '') +
+    `<button class="button button-secondary" data-action="sync-revx" ${revx.syncing ? 'disabled' : ''}>${icon('wallet')}${revx.syncing ? 'Syncing…' : revxSynced() ? 'Sync Revolut X' : 'Link Revolut X'}</button><button class="button button-secondary" data-action="refresh" ${market.refreshing ? 'disabled' : ''}>${icon('refresh')}${market.refreshing ? 'Refreshing…' : 'Refresh prices'}</button><button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button>`) +
+    (revx.error ? `<div class="market-status warning">${icon('info')}<span>${esc(revx.error)}${revxSynced() ? ' Your last synced balances are still shown.' : ''}</span>${revx.needsPermission ? `<button class="button button-secondary" data-action="revx-permissions">Open permissions</button>` : ''}</div>` : '') +
     exampleBanner() +
     `<div class="section-heading"><h2>Investment accounts</h2><button class="button button-secondary" data-action="add-account">${icon('plus')}Add account</button></div>
     ${state.accounts.length ? `<div class="account-grid">${accounts}</div>` : '<p class="panel-kicker" style="margin:-4px 0 22px">Group holdings by ISA, pension or broker account to see tax-wrapper exposure.</p>'}
@@ -1868,6 +1893,7 @@ document.addEventListener('click', async (e) => {
     case 'close-modal': closeModal(); break;
     case 'refresh': e.preventDefault(); refreshMarket({ manual: true }); break;
     case 'sync-revx': e.preventDefault(); syncRevolut({ manual: true }); break;
+    case 'revx-permissions': e.preventDefault(); openPermissions(); break;
     case 'retry-price': { const h = find(state.holdings); if (!h) break; market.lastRefreshAt = 0; await refreshMarket({ manual: true }); break; }
     case 'add-holding': e.preventDefault(); if (route() !== 'holdings') location.hash = 'holdings'; setTimeout(() => holdingForm(null), 0); break;
     case 'edit-holding': holdingForm(find(state.holdings)); break;
