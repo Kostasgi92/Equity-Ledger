@@ -1169,8 +1169,9 @@ async function fetchRevolutLive() {
   return { rows, tickers, orders, ordersError, names };
 }
 // The Revolut X connector can refuse calls from artifact pages (it rejected claude.ai's connector protocol
-// version), so a Claude routine reads Revolut X and writes the "revolut" document; this page applies it.
-const REVX_TRIGGER_ID = 'trig_01EH3DKhWSho5kKxfyCxx8n9';
+// version), so a Claude routine wakes a worker session that holds the connector; it reads Revolut X and
+// writes the "revolut" document, and this page applies it.
+const REVX_TRIGGER_ID = 'trig_01Tbtp2sZ6ZQ9v1cNoczAcKX';
 const REVX_STALE_MS = 3 * 3600_000;
 const revxLastWrite = () => Math.max(Date.parse(revx.snapshot?.syncedAt || '') || 0, Date.parse(revx.snapshot?.errorAt || '') || 0);
 const revxPending = () => Boolean(revx.requestedAt) && Date.now() - revx.requestedAt < 10 * 60_000 && revxLastWrite() < revx.requestedAt;
@@ -1199,7 +1200,7 @@ function onRevolutSnapshot() {
   if (!revxSynced() && !pending) return; // unlinked: ignore scheduled snapshots
   if (errorAt > syncedAt && errorAt > (Date.parse(account?.syncedAt || '') || 0)) {
     const missing = /not available|no tools|no matching|not connected|connector/i.test(d.error || '');
-    revx.error = missing ? 'The Revolut X sync routine has no Revolut X connector. In claude.ai, open your routines, edit “Equity Ledger Revolut X sync”, add the Revolut X connector and save, then press Sync.'
+    revx.error = missing ? 'The Revolut X sync could not reach your Revolut X connector. Check that Revolut X is still connected in claude.ai Settings → Connectors, then press Sync.'
       : `The last Revolut X sync failed: ${d.error || 'unknown error'}.`;
     if (revx.requestManual && pending) toast('The Revolut X sync failed.');
     revx.requestManual = false; if (!modalEl) render(); return;
