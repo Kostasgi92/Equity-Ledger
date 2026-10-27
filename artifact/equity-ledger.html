@@ -349,6 +349,7 @@ const gbp = (v, digits = 0) => new Intl.NumberFormat('en-GB', { style: 'currency
 const money = (v, cur, digits = 2) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Number(v) || 0);
 const pct = (v, digits = 1) => `${(Number(v) || 0).toFixed(digits)}%`;
 const signedPct = (v, digits = 2) => `${v > 0 ? '+' : ''}${(Number(v) || 0).toFixed(digits)}%`;
+const priceDigits = (v) => { const n = Math.abs(Number(v)); return n > 0 && n < 0.01 ? Math.min(12, 3 - Math.floor(Math.log10(n))) : n < 10 ? 4 : 2; };
 const units = (v) => new Intl.NumberFormat('en-GB', { maximumFractionDigits: 6 }).format(Number(v) || 0);
 const round = (value, digits = 2) => Number(Number(value).toFixed(digits));
 const todayUtc = () => new Date().toISOString().slice(0, 10);
@@ -1032,7 +1033,7 @@ async function refreshMarket({ manual = false } = {}) {
 /* Revolut X: account balances become crypto holdings in a "Revolut X" account, priced from Revolut X GBP markets. */
 const REVX_SERVER = 'Revolut X';
 const REVX_MIN_GBP = 1; // balances worth less than £1 are dust and are left out
-const revx = { syncing: false, error: null, needsPermission: false };
+const revx = { syncing: false, error: null, needsPermission: false, ordersError: null };
 const revxData = (res) => { const p = payloadOf(res); return p && 'data' in p ? p.data : p; };
 const revxSynced = () => state.holdings.some((h) => h.source === 'revolut_x') || state.accounts.some((a) => a.source === 'revolut_x');
 function revxErrorText(e) {
@@ -1083,6 +1084,29 @@ function revxQuote(code, tickers, fx) {
   }
   return null;
 }
+// Open sell orders on Revolut X. Limit orders carry price, quantity and leaves_quantity (still to fill).
+async function revxSellOrders() {
+  const out = []; let cursor = null;
+  for (let page = 0; page < 4; page += 1) {
+    const res = payloadOf(await caps.mcp.callTool(REVX_SERVER, 'revx_get_active_orders', { side: 'SELL', limit: 50, ...(cursor ? { cursor } : {}) }));
+    const rows = Array.isArray(res?.data) ? res.data : [];
+    out.push(...rows);
+    cursor = res?.metadata?.next_cursor;
+    if (!cursor || rows.length < 50) break;
+  }
+  return out.filter((o) => String(o.side).toLowerCase() === 'sell');
+}
+const ORDER_PRICE_KEYS = ['price', 'limit_price', 'trigger_price', 'stop_price'];
+const ORDER_TYPES = { limit: 'Limit', tpsl: 'TP/SL', conditional: 'Conditional', twap: 'TWAP', market: 'Market' };
+function sellOrderItem(o) {
+  const [base, quote] = String(o.symbol || '').toUpperCase().split('/');
+  const priceKey = ORDER_PRICE_KEYS.find((k) => Number(o[k]) > 0);
+  return {
+    id: o.id || null, base, quote: quote || null, type: String(o.type || '').toLowerCase(), price: priceKey ? Number(o[priceKey]) : null, priceKind: priceKey || null,
+    quantity: Number(o.quantity) || null, remaining: Number(o.leaves_quantity ?? o.quantity) || 0, filled: Number(o.filled_quantity) || 0,
+    status: String(o.status || '').toLowerCase(), timeInForce: o.time_in_force || null, createdAt: o.created_date || null,
+  };
+}
 async function syncRevolut({ manual = false } = {}) {
   if (revx.syncing) return false;
   if (!caps.mcp && window.claude?.use) caps.mcp = await window.claude.use('mcp').catch(() => null);
@@ -1123,11 +1147,16 @@ async function syncRevolut({ manual = false } = {}) {
       if (state.schedules.some((s) => s.holdingId === h.id)) { h.units = 0; return true; }
       state.alerts = state.alerts.filter((a) => a.holdingId !== h.id); return false;
     });
+    let orders = null;
+    try { orders = (await revxSellOrders()).map(sellOrderItem).filter((o) => o.base && o.remaining > 0); revx.ordersError = null; account.ordersSyncedAt = now; }
+    catch (e) { revx.ordersError = revxErrorText(e); revx.ordersNeedPermission = revxNeedsPermission(e); }
+    if (orders) state.holdings.forEach((h) => { if (h.source === 'revolut_x') h.sellOrders = orders.filter((o) => o.base === h.ticker); });
+    const nOrders = orders ? orders.length : null;
     Object.assign(account, { syncedAt: now, syncError: null });
-    if (added || changed || gone.length || manual) logActivity(state, 'Revolut X synced', `${priced.length} crypto balances${added ? ` · ${added} added` : ''}${changed ? ` · ${changed} changed` : ''}${gone.length ? ` · ${gone.join(', ')} no longer held` : ''}`, 'market');
+    if (added || changed || gone.length || manual) logActivity(state, 'Revolut X synced', `${priced.length} crypto balances${nOrders ? ` · ${nOrders} open sell ${nOrders === 1 ? 'order' : 'orders'}` : ''}${added ? ` · ${added} added` : ''}${changed ? ` · ${changed} changed` : ''}${gone.length ? ` · ${gone.join(', ')} no longer held` : ''}`, 'market');
     revx.error = null; revx.needsPermission = false; store.set('el.revx', '1');
     save();
-    if (manual) toast(`Revolut X synced: ${priced.length} crypto ${priced.length === 1 ? 'holding' : 'holdings'}.`);
+    if (manual) toast(`Revolut X synced: ${priced.length} crypto ${priced.length === 1 ? 'holding' : 'holdings'}${nOrders ? `, ${nOrders} open sell ${nOrders === 1 ? 'order' : 'orders'}` : ''}.${revx.ordersError ? ' Sell orders could not be read.' : ''}`);
     return true;
   } catch (e) {
     revx.error = revxErrorText(e); revx.needsPermission = revxNeedsPermission(e);
@@ -1380,11 +1409,11 @@ function holdingsView(s) {
     const acc = h.accountId ? accountMap.get(h.accountId) : null;
     const st = h.priceStatus;
     return `<tr class="data-row">
-      <td><div class="ticker-cell"><span class="ticker-mark">${esc(h.ticker.slice(0, 4))}</span><div><strong>${esc(h.name)}</strong><span>${esc(h.ticker)}${h.theme ? ` · ${esc(h.theme)}` : ''}${h.source === 'revolut_x' ? ' · Revolut X' : ''}</span></div></div></td>
+      <td><div class="ticker-cell"><span class="ticker-mark">${esc(h.ticker.slice(0, 4))}</span><div><strong>${esc(h.name)}</strong><span>${esc(h.ticker)}${h.theme ? ` · ${esc(h.theme)}` : ''}${h.source === 'revolut_x' ? ' · Revolut X' : ''}${h.sellOrders?.length ? ` · ${h.sellOrders.length} sell ${h.sellOrders.length === 1 ? 'limit' : 'limits'}` : ''}</span></div></div></td>
       <td><span class="tag">${esc(ASSET_CLASSES[h.assetClass] || h.assetClass)}</span></td>
       <td>${acc ? esc(acc.name) : '<span class="panel-kicker">Unassigned</span>'}</td>
       <td class="r mono">${units(h.units)}</td>
-      <td class="r mono">${money(h.price, h.currency, Number(h.price) < 0.01 && Number(h.price) > 0 ? Math.min(12, 3 - Math.floor(Math.log10(Number(h.price)))) : Number(h.price) < 10 ? 4 : 2)}<span class="price-source">${st === 'live' ? `${esc(h.priceSource || 'CoinMarketCap')} · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
+      <td class="r mono">${money(h.price, h.currency, priceDigits(h.price))}<span class="price-source">${st === 'live' ? `${esc(h.priceSource || 'CoinMarketCap')} · ${relTime(h.priceUpdatedAt)}` : st === 'failed' ? 'Quote failed' : 'Entered by you'}</span></td>
       <td class="r mono">${gbp(h.valueGbp, 2)}</td>
       <td class="r mono ${Number(h.dayChange) > 0 ? 'positive' : Number(h.dayChange) < 0 ? 'negative' : ''}">${signedPct(Number(h.dayChange))}</td>
       <td class="r mono">${pct(h.dividendYield, 2)}</td>
@@ -1404,7 +1433,34 @@ function holdingsView(s) {
     ${state.accounts.length ? `<div class="account-grid">${accounts}</div>` : '<p class="panel-kicker" style="margin:-4px 0 22px">Group holdings by ISA, pension or broker account to see tax-wrapper exposure.</p>'}
     <div class="section-heading"><h2>Positions</h2></div>
     <div class="panel">${rows ? `<div class="table-wrap"><table><thead><tr><th>Holding</th><th>Class</th><th>Account</th><th class="r">Units</th><th class="r">Price</th><th class="r">Value</th><th class="r">Day</th><th class="r">Yield</th><th>Price</th><th><span hidden>Actions</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
-      : emptyBlock('holdings', 'No holdings yet', 'Add a fund, share, crypto asset or cash balance. Values are normalised to GBP using automatically tracked FX rates.', `<button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button><button class="button button-secondary" data-action="load-examples">Load example portfolio</button>`)}</div>`;
+      : emptyBlock('holdings', 'No holdings yet', 'Add a fund, share, crypto asset or cash balance. Values are normalised to GBP using automatically tracked FX rates.', `<button class="button button-primary" data-action="add-holding">${icon('plus')}Add holding</button><button class="button button-secondary" data-action="load-examples">Load example portfolio</button>`)}</div>` +
+    sellOrdersPanel(s);
+}
+const quoteToGbp = (quote, fx) => (quote === 'GBP' ? 1 : ['USD', 'USDC', 'USDT'].includes(quote) ? fx.USD : quote === 'EUR' ? fx.EUR : null);
+const quotePrice = (v, quote) => (['GBP', 'USD', 'EUR'].includes(quote) ? money(v, quote, priceDigits(v)) : `${units(v)} ${esc(quote || '')}`);
+function sellOrdersPanel(s) {
+  if (!revxSynced()) return '';
+  const fx = fxToGbp(state);
+  const account = state.accounts.find((a) => a.source === 'revolut_x');
+  const rows = s.holdings.filter((h) => h.source === 'revolut_x').flatMap((h) => (h.sellOrders || []).map((o) => ({ h, o })))
+    .sort((a, b) => a.h.ticker.localeCompare(b.h.ticker) || (a.o.price || 0) - (b.o.price || 0));
+  const checked = account?.ordersSyncedAt ? `Checked ${relTime(account.ordersSyncedAt)}` : 'Not checked yet';
+  const warn = revx.ordersError ? `<div class="market-status warning" style="margin:0 24px 14px">${icon('info')}<span>Sell orders: ${esc(revx.ordersError)}</span>${revx.ordersNeedPermission ? '<button class="button button-secondary" data-action="revx-permissions">Open permissions</button>' : ''}</div>` : '';
+  const body = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Coin</th><th>Order</th><th class="r">Sell at</th><th class="r">Still to sell</th><th class="r">Of holding</th><th class="r">Value at limit</th><th class="r">vs now</th><th>Placed</th></tr></thead><tbody>${rows.map(({ h, o }) => {
+    const rate = quoteToGbp(o.quote, fx); const priceGbp = o.price && rate ? o.price * rate : null;
+    const nowGbp = Number(h.price) * (fx[h.currency] || 0); const gap = priceGbp && nowGbp > 0 ? (priceGbp / nowGbp - 1) * 100 : null;
+    return `<tr class="data-row">
+      <td><div class="ticker-cell"><span class="ticker-mark">${esc(h.ticker.slice(0, 4))}</span><div><strong>${esc(h.name)}</strong><span>${esc(o.base)}/${esc(o.quote || '—')}</span></div></div></td>
+      <td><span class="tag">${esc(ORDER_TYPES[o.type] || o.type || 'Order')}</span>${o.priceKind && o.priceKind !== 'price' ? `<span class="price-source">${esc(o.priceKind.replace('_', ' '))}</span>` : ''}</td>
+      <td class="r mono">${o.price ? quotePrice(o.price, o.quote) : '—'}${priceGbp && o.quote !== 'GBP' ? `<span class="price-source">≈ ${gbp(priceGbp, priceDigits(priceGbp))}</span>` : ''}</td>
+      <td class="r mono">${units(o.remaining)}${o.filled > 0 ? `<span class="price-source">${units(o.filled)} filled</span>` : ''}</td>
+      <td class="r mono">${Number(h.units) > 0 ? pct((o.remaining / Number(h.units)) * 100, 0) : '—'}</td>
+      <td class="r mono">${priceGbp ? gbp(o.remaining * priceGbp, 2) : '—'}</td>
+      <td class="r mono ${gap > 0 ? 'positive' : gap < 0 ? 'negative' : ''}">${gap === null ? '—' : `${signedPct(gap, 1)}`}</td>
+      <td class="mono">${fmtDate(o.createdAt)}${o.timeInForce ? `<span class="price-source">${esc(String(o.timeInForce).toUpperCase())}</span>` : ''}</td></tr>`;
+  }).join('')}</tbody></table></div>`
+    : `<p class="panel-kicker" style="padding:4px 24px 22px">No open sell orders on Revolut X.</p>`;
+  return `<div class="section-heading"><h2>Revolut X sell limits</h2><span class="panel-kicker">${checked} · read-only from Revolut X</span></div><div class="panel">${warn}${body}</div>`;
 }
 
 function liabilitiesView(s) {
