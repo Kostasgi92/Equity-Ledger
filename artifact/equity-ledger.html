@@ -1225,7 +1225,7 @@ function onRevolutSnapshot() {
   if (!revxSynced() && !pending) return; // unlinked: ignore scheduled snapshots
   if (errorAt > syncedAt && errorAt > (Date.parse(account?.syncedAt || '') || 0)) {
     const missing = /not available|no tools|no matching|not connected|connector/i.test(d.error || '');
-    revx.error = missing ? 'The sync ran without your Revolut X connector. In claude.ai, open Claude Code → Routines → “Equity Ledger Revolut X sync”, add the Revolut X connector, save, then press Sync again.'
+    revx.error = missing ? 'The sync ran without your Revolut X connector. Open claude.ai/code/routines in a browser, click “Equity Ledger Revolut X sync”, open the menu next to its name and choose Edit, then in Advanced settings → Connectors add Revolut X and click Save changes. Then press Sync again.'
       : `The last Revolut X sync failed: ${d.error || 'unknown error'}.`;
     if (revx.requestManual && pending) toast('The Revolut X sync failed.');
     revx.requestManual = false; if (!modalEl) render(); return;
