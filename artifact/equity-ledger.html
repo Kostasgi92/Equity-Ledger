@@ -1033,14 +1033,16 @@ async function refreshMarket({ manual = false } = {}) {
     await refreshFx({ force: manual });
     if (revxSynced()) await syncRevolut();
     const fx = fxToGbp(state);
-    const live = state.holdings.filter((h) => !isManuallyValued(h) && h.source !== 'revolut_x');
+    // Revolut X prices come with each sync; when the last one is over 30 minutes old, CoinMarketCap keeps them current.
+    const revxPriceStale = (h) => Date.now() - (Date.parse(h.priceUpdatedAt || '') || 0) > 30 * 60_000;
+    const live = state.holdings.filter((h) => !isManuallyValued(h) && (h.source !== 'revolut_x' || revxPriceStale(h)));
     for (const h of live) {
       try {
         const sym = h.ticker.toUpperCase().split('-')[0];
         const q = (market.radarAt && market.radar?.find((i) => i.symbol === sym)) || await fetchCmcQuote(h);
         if (q.cmcId && !h.cmcId) h.cmcId = q.cmcId;
-        const priceInCur = (q.price * fx.USD) / fx[h.currency];
-        Object.assign(h, { price: round(priceInCur, 6), referencePrice: h.referencePrice ?? round(priceInCur, 6), dayChange: round(q.dayChange, 4), priceUpdatedAt: q.timestamp, priceSource: 'CoinMarketCap', priceError: null, updatedAt: new Date().toISOString() });
+        const priceInCur = Number(((q.price * fx.USD) / fx[h.currency]).toPrecision(10)); // keeps sub-penny coins exact
+        Object.assign(h, { price: priceInCur, referencePrice: h.referencePrice ?? priceInCur, dayChange: round(q.dayChange, 4), priceUpdatedAt: q.timestamp, priceSource: 'CoinMarketCap', priceError: null, updatedAt: new Date().toISOString() });
         evaluateAlerts(state, h); updated += 1;
       } catch (e) {
         h.priceError = mcpErrorText(e); failures.push(`${h.ticker}: ${h.priceError}`);
