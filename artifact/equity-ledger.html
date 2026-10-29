@@ -1223,7 +1223,8 @@ async function requestRevolutSync({ manual = false } = {}) {
   if (revxPending()) { if (manual) toast('A Revolut X sync is already running.'); return false; }
   const snapAt = Date.parse(revx.snapshot?.syncedAt || '') || 0;
   if (!manual && (Date.now() - snapAt < REVX_STALE_MS || Date.now() - revx.requestedAt < 30 * 60_000)) return false;
-  if (!caps.remote) { revx.error = 'Revolut X can’t be called from this page, and starting a sync needs the Claude Code Remote connector. Scheduled syncs still run.'; return false; }
+  if (!caps.remote) { revx.error = 'Revolut X can’t be called from this page, and starting a sync needs the Claude Code Remote connector.'; return false; }
+  if (revx.syncBlocked) { if (manual) toast(revx.error || 'Syncing from this page is blocked by claude.ai.'); return false; }
   try {
     await archiveRevolutSyncSession();
     const id = await startRevolutSyncSession(); if (id) store.set('el.revxSession', id);
@@ -1231,9 +1232,12 @@ async function requestRevolutSync({ manual = false } = {}) {
     if (manual) toast('Syncing Revolut X through Claude. Balances arrive in a minute or two.');
     return true;
   } catch (e) {
-    revx.error = e?.code === 'server_not_connected' ? 'Connect Claude Code Remote in claude.ai Settings → Connectors to sync Revolut X on demand. Scheduled syncs still run.'
-      : ['not_in_manifest', 'not_granted', 'approval_required'].includes(e?.code) ? 'Starting a Revolut X sync was not allowed for this page. Scheduled syncs still run.'
-      : `The Revolut X sync could not be started${e?.code ? ` (${e.code})` : ''}. Scheduled syncs still run.`;
+    // A policy block is permanent for this page, so stop asking until it reloads.
+    if (e?.code === 'blocked_by_policy') revx.syncBlocked = true;
+    revx.error = e?.code === 'blocked_by_policy' ? 'claude.ai does not let this page start the Revolut X sync, so balances are not updating automatically.'
+      : e?.code === 'server_not_connected' ? 'Connect Claude Code Remote in claude.ai Settings → Connectors to sync Revolut X from this page.'
+      : ['not_in_manifest', 'not_granted', 'approval_required'].includes(e?.code) ? 'Starting a Revolut X sync was not allowed for this page.'
+      : `The Revolut X sync could not be started${e?.code ? ` (${e.code})` : ''}.`;
     return false;
   }
 }
