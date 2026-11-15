@@ -223,6 +223,22 @@ tr.data-row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent
 .news-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--muted); font: 500 10px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
 .news-meta b { font-weight: 500; } .news-meta b.pub-preferred { color: var(--primary); }
 .chip-on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.brief-headline { margin: 6px 0 10px; font: 600 24px/1.2 var(--font-serif); color: var(--primary); text-wrap: balance; }
+.brief-card { border: 1px solid var(--border); border-radius: 12px; background: var(--bg); padding: 14px 16px; }
+.brief-card > summary { list-style: none; cursor: pointer; display: grid; gap: 6px; }
+.brief-card > summary::-webkit-details-marker { display: none; }
+.brief-card > summary strong { font: 600 18px/1.25 var(--font-serif); color: var(--primary); }
+.brief-card > summary p { margin: 0; color: var(--fg); font-size: 13px; line-height: 1.55; }
+.brief-card > summary .tag { justify-self: start; }
+.brief-card[open] > summary { padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.brief-card > summary::after { content: 'Show details ▾'; color: var(--muted); font: 500 10px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+.brief-card[open] > summary::after { content: 'Hide details ▴'; }
+.brief-snaps { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+.brief-timeline { display: grid; gap: 0; border-left: 2px solid var(--border); margin-left: 6px; }
+.brief-event { position: relative; display: grid; gap: 6px; padding: 4px 0 18px 18px; }
+.brief-event::before { content: ''; position: absolute; left: -7px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.brief-event strong { font: 600 17px/1.3 var(--font-serif); color: var(--primary); }
+.brief-event p { margin: 0; color: var(--fg); font-size: 13px; line-height: 1.55; }
 .crypto-panel > summary { list-style: none; cursor: pointer; } .crypto-panel > summary::-webkit-details-marker { display: none; }
 .crypto-panel[open] > summary { border-bottom: 1px solid var(--border); padding-bottom: 16px; }
 .loan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; }
@@ -1738,7 +1754,7 @@ function newsView() {
   const updateBtn = `<button class="button button-primary" data-action="request-briefing" ${briefingUi.requesting || pending ? 'disabled' : ''}>${icon('refresh')}${pending ? 'Updating…' : 'Update briefing'}</button>`;
   const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, with Bloomberg, CNBC, Morningstar UK, City AM and Forbes, plus headlines from the FT, NYT, WSJ and The Economist. Refreshed every weekday morning and evening (UK time).', updateBtn);
   const statusBar = `<div class="market-status ${briefingUi.error ? 'warning' : ''}">${icon(briefingUi.error ? 'info' : 'calendar')}<span>${briefingUi.error ? esc(briefingUi.error) : pending ? 'Gathering today’s news and market data. This page updates by itself when the briefing is ready.' : b?.generatedAt ? `Briefing written ${relTime(b.generatedAt)}${b.market?.asOf ? ` for the ${fmtDate(b.market.asOf)} session` : ''}. Next scheduled update at 06:52 or 17:52 UK time on weekdays.` : 'Scheduled updates run at 06:52 and 17:52 UK time on weekdays.'}</span></div>`;
-  if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + cmcSection() + cryptoSection();
+  if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + generalNewsSection(null, () => true) + cmcSection() + cryptoSection();
   const m = b.market;
   const held = new Map(state.holdings.map((h) => [h.ticker.toUpperCase(), h]));
   const covered = new Set(b.holdingsNews.map((g) => g.ticker));
@@ -1761,7 +1777,7 @@ function newsView() {
     ${groups.length ? `<div class="news-groups">${groups.map((g) => { const h = held.get(g.ticker); return `<div class="panel"><div class="panel-header"><div class="ticker-cell"><span class="ticker-mark">${esc(g.ticker.slice(0, 4))}</span><div><strong>${esc(h?.name || g.name || g.ticker)}</strong><span>${esc(g.ticker)}${h ? ` · ${ASSET_CLASSES[h.assetClass] || ''}` : ''}</span></div></div></div><div class="panel-body news-list">${g.items.length ? g.items.map((i) => newsItem(i)).join('') : `<p class="panel-kicker">${pf === 'all' ? 'No notable news in the last week.' : 'Nothing from this publisher.'}</p>`}</div></div>`; }).join('')}</div>`
       : `<div class="panel">${emptyBlock('holdings', state.holdings.length ? 'No holding news yet' : 'Add holdings to get their news', state.holdings.length ? 'News for your holdings appears after the next briefing update.' : 'Each briefing searches news for every holding in your ledger. Add your investments on the Holdings page.', state.holdings.length ? '' : '<a class="button button-secondary" href="#holdings">Go to holdings</a>')}</div>`}
     ${missing.length ? `<p class="panel-kicker" style="margin-top:10px">${missing.map((h) => esc(h.ticker)).join(', ')} will be included in the next update.</p>` : ''}
-    ${headlinesPanel(b, pass)}
+    ${generalNewsSection(b, pass)}
     <p class="panel-kicker" style="margin-top:10px">Sources: ${NEWS_SOURCES.map((x) => x.name).join(', ')}. Links open the publisher’s site; articles marked Subscriber need you to sign in.</p>` +
     cmcSection() + cryptoSection();
 }
@@ -1819,6 +1835,53 @@ function cmcOverviewCard() {
         </div>
         <p class="panel-kicker">BTC dominance ${d.btcDominance === null ? '—' : pct(d.btcDominance, 1)} · Altcoin season ${d.altSeason ?? '—'}/100. Context for long-term decisions, not a trading signal.</p>
       </div></div></div></div>`;
+}
+/* General news: the weekly brief (overview, markets & macro, sectors, week ahead) plus the headline feed.
+   The brief lives in the "weeklyBrief" document, so a new week replaces it without republishing the page. */
+const weeklyUi = { doc: null, tab: store.get('el.weeklyTab') || 'overview', snap: 'All', sector: 'All', reg: null };
+const WEEKLY_TABS = [['overview', 'Overview'], ['markets', 'Markets & macro'], ['sectors', 'Sectors'], ['ahead', 'Week ahead'], ['headlines', 'Headlines']];
+const dirClass = (d) => (d === 'up' ? 'positive' : d === 'down' ? 'negative' : '');
+const dirMark = (d) => (d === 'up' ? '▲' : d === 'down' ? '▼' : '◆');
+const sentimentBadge = (s) => badge(/bullish/i.test(s) ? 'live' : /pressured/i.test(s) && !/mixed/i.test(s) ? 'failed' : 'watch', s);
+function weeklyOverview(w) {
+  const e = w.executiveSummary || {}; const cats = ['All', ...new Set((w.snapshots || []).map((s) => s.category))];
+  const snaps = (w.snapshots || []).filter((s) => weeklyUi.snap === 'All' || s.category === weeklyUi.snap);
+  return `<div class="stack">
+    <div><div class="eyebrow">${esc(e.kicker || 'Top takeaway')}</div><h3 class="brief-headline">${esc(e.headline || '')}</h3><p class="lede">${esc(e.body || '')}</p></div>
+    ${(e.highlights || []).length ? `<div class="index-grid brief-snaps">${e.highlights.map((h) => `<div class="index-tile"><span>${esc(h.label)}</span><strong class="num ${dirClass(h.tone)}">${esc(h.value)}</strong></div>`).join('')}</div>` : ''}
+    <div><div class="stat-label" style="margin-bottom:8px">Market snapshot${w.snapshotsNote ? ` · ${esc(w.snapshotsNote)}` : ''}</div>
+      <div class="prompt-chips" style="margin:0 0 10px" role="group" aria-label="Filter the snapshot">${cats.map((c) => `<button class="chip ${weeklyUi.snap === c ? 'chip-on' : ''}" data-action="weekly-snap" data-v="${esc(c)}" aria-pressed="${weeklyUi.snap === c}">${esc(c)}</button>`).join('')}</div>
+      <div class="index-grid brief-snaps">${snaps.map((s) => `<div class="index-tile"><span>${esc(s.name)}</span><strong class="num">${esc(s.value)}</strong><em class="${dirClass(s.direction)}">${dirMark(s.direction)} ${esc(s.move)}</em></div>`).join('')}</div></div>
+  </div>`;
+}
+function weeklyMarkets(w) {
+  return `<div class="stack">${(w.marketsMacro || []).map((c, n) => {
+    let body;
+    if (Array.isArray(c.subTabs) && c.subTabs.length) {
+      const active = c.subTabs.find((t) => t.key === weeklyUi.reg) || c.subTabs[0];
+      body = `<div class="prompt-chips" style="margin:10px 0" role="group" aria-label="${esc(c.title)}">${c.subTabs.map((t) => `<button class="chip ${t.key === active.key ? 'chip-on' : ''}" data-action="weekly-reg" data-v="${esc(t.key)}" aria-pressed="${t.key === active.key}">${esc(t.label)}</button>`).join('')}</div><ul class="plain-list">${active.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`;
+    } else body = `<ul class="plain-list" style="margin-top:10px">${(c.bullets || []).map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`;
+    return `<details class="brief-card" ${n === 0 || c.subTabs ? 'open' : ''}><summary><span class="tag">${esc(c.category)}</span><strong>${esc(c.title)}</strong><span class="price-source" style="white-space:normal">${esc(c.metric || '')}</span><p>${esc(c.summary || '')}</p></summary>${body}</details>`;
+  }).join('')}</div>`;
+}
+function weeklySectors(w) {
+  const list = (w.sectors || []).filter((s) => weeklyUi.sector === 'All' || (s.filterTags || [s.sentiment]).includes(weeklyUi.sector));
+  return `<div class="prompt-chips" style="margin:0 0 12px" role="group" aria-label="Filter sectors">${['All', 'Bullish', 'Mixed', 'Pressured'].map((f) => `<button class="chip ${weeklyUi.sector === f ? 'chip-on' : ''}" data-action="weekly-sector" data-v="${f}" aria-pressed="${weeklyUi.sector === f}">${f}</button>`).join('')}</div>
+    <div class="focus-grid">${list.map((s) => `<div class="focus-card"><div class="focus-top"><h3>${esc(s.name)}</h3>${sentimentBadge(s.sentiment)}</div><p>${esc(s.note)}</p></div>`).join('') || '<p class="panel-kicker">No sectors with this sentiment.</p>'}</div>`;
+}
+function weeklyAhead(w) {
+  return `${w.weekAheadNote ? `<p class="panel-kicker" style="margin:0 0 12px">${esc(w.weekAheadNote)}</p>` : ''}<div class="brief-timeline">${(w.weekAhead || []).map((c) => `<div class="brief-event"><div class="news-meta"><b class="pub-preferred">${esc(c.date)}</b> · <span class="tag tag-sub">${esc(c.tag)}</span> · ${esc(c.impact || '')}</div><strong>${esc(c.title)}</strong><p>${esc(c.details)}</p></div>`).join('')}</div>`;
+}
+function generalNewsSection(b, pass) {
+  const w = weeklyUi.doc;
+  const tabs = WEEKLY_TABS.filter(([k]) => (k === 'headlines' ? Boolean(b) : Boolean(w)));
+  if (!tabs.length) return '';
+  const tab = tabs.some(([k]) => k === weeklyUi.tab) ? weeklyUi.tab : tabs[0][0];
+  const body = tab === 'headlines' ? null : tab === 'markets' ? weeklyMarkets(w) : tab === 'sectors' ? weeklySectors(w) : tab === 'ahead' ? weeklyAhead(w) : weeklyOverview(w);
+  const kicker = w ? `${esc(w.source || 'Weekly brief')} · ${esc(w.edition || '')}${w.readTime ? ` · ${esc(w.readTime)}` : ''}` : 'Headlines for a long-term UK investor';
+  return `<div class="section-heading"><h2>General news</h2><span class="panel-kicker">${kicker}</span></div>
+    <div class="prompt-chips" style="margin:0 0 12px" role="tablist" aria-label="General news">${tabs.map(([k, l]) => `<button class="chip ${tab === k ? 'chip-on' : ''}" role="tab" aria-selected="${tab === k}" data-action="weekly-tab" data-v="${k}">${l}</button>`).join('')}</div>
+    ${body === null ? headlinesPanel(b, pass).replace('style="margin-top:16px"', '') : `<div class="panel"><div class="panel-body" style="padding-top:20px">${body}</div></div>`}`;
 }
 function headlinesPanel(b, pass) {
   // One list: WebSearch headlines and the FT / NYT / WSJ / Economist RSS headlines, newest first.
@@ -2135,6 +2198,10 @@ document.addEventListener('click', async (e) => {
     case 'request-briefing': requestBriefing(); break;
     case 'load-cmc': loadCmc({ manual: true }); break;
     case 'news-publisher': briefingUi.publisher = el.dataset.pub; render(); break;
+    case 'weekly-tab': weeklyUi.tab = el.dataset.v; store.set('el.weeklyTab', weeklyUi.tab); render(); break;
+    case 'weekly-snap': weeklyUi.snap = el.dataset.v; render(); break;
+    case 'weekly-sector': weeklyUi.sector = el.dataset.v; render(); break;
+    case 'weekly-reg': weeklyUi.reg = el.dataset.v; render(); break;
     case 'load-examples': loadExamples(); break;
     case 'clear-examples': clearExamples(); break;
   }
@@ -2182,6 +2249,9 @@ function toast(message) {
     lastSavedJson = json; state = hydrate(snapDoc.data()); if (!modalEl) render();
   }, (e) => { if (e?.code === 'revoked') { phase = 'expired'; render(); } });
   caps.db.collection(`data/users/${caps.uid}`).doc('revolut').onSnapshot((d) => { revx.snapshot = d.exists ? d.data() : null; onRevolutSnapshot(); }, () => {});
+  caps.db.collection(`data/users/${caps.uid}`).doc('weeklyBrief').onSnapshot((d) => {
+    weeklyUi.doc = d.exists ? d.data() : null; if (!modalEl && route() === 'news') render();
+  }, () => {});
   caps.db.collection(`data/users/${caps.uid}`).doc('briefing').onSnapshot((d) => {
     briefingUi.loaded = true; briefingUi.doc = d.exists ? d.data() : null;
     if (!modalEl && route() === 'news') render();
