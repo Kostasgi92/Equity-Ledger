@@ -1707,6 +1707,12 @@ const NEWS_SOURCES = [
   { name: 'The New York Times', domains: ['nytimes.com'], paywall: true },
   { name: 'The Wall Street Journal', domains: ['wsj.com'], paywall: true },
   { name: 'The Economist', domains: ['economist.com'], paywall: true },
+  { name: 'Kathimerini', domains: ['kathimerini.gr', 'ekathimerini.com'] },
+  { name: 'Naftemporiki', domains: ['naftemporiki.gr'] },
+  { name: 'Oikonomikos Taxydromos', domains: ['ot.gr'] },
+  { name: 'Euronews', domains: ['euronews.com'] },
+  { name: 'CNN', domains: ['cnn.com'] },
+  { name: 'BBC', domains: ['bbc.co.uk', 'bbc.com'] },
 ];
 const isPaywalled = (publisher) => Boolean(NEWS_SOURCES.find((x) => x.name === publisher)?.paywall);
 const sourceFor = (url) => { const h = hostOf(url); return NEWS_SOURCES.find((s) => s.domains.some((d) => h === d || h.endsWith(`.${d}`))) || null; };
@@ -1752,7 +1758,7 @@ function newsView() {
   const b = briefingData();
   const pending = briefingUi.requestedAt && (!b?.generatedAt || Date.parse(b.generatedAt) < briefingUi.requestedAt) && Date.now() - briefingUi.requestedAt < 20 * 60_000;
   const updateBtn = `<button class="button button-primary" data-action="request-briefing" ${briefingUi.requesting || pending ? 'disabled' : ''}>${icon('refresh')}${pending ? 'Updating…' : 'Update briefing'}</button>`;
-  const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, with Bloomberg, CNBC, Morningstar UK, City AM and Forbes, plus headlines from the FT, NYT, WSJ and The Economist. Refreshed every weekday morning and evening (UK time).', updateBtn);
+  const heading = pageHeading('News', 'The market, through your portfolio.', 'Your news thread from Yahoo Finance, with Bloomberg, CNBC, Morningstar UK, City AM and Forbes, plus headlines from the FT, NYT, WSJ, The Economist, Kathimerini, Naftemporiki, Oikonomikos Taxydromos, Euronews, CNN and the BBC. Refreshed every weekday morning and evening (UK time).', updateBtn);
   const statusBar = `<div class="market-status ${briefingUi.error ? 'warning' : ''}">${icon(briefingUi.error ? 'info' : 'calendar')}<span>${briefingUi.error ? esc(briefingUi.error) : pending ? 'Gathering today’s news and market data. This page updates by itself when the briefing is ready.' : b?.generatedAt ? `Briefing written ${relTime(b.generatedAt)}${b.market?.asOf ? ` for the ${fmtDate(b.market.asOf)} session` : ''}. Next scheduled update at 06:52 or 17:52 UK time on weekdays.` : 'Scheduled updates run at 06:52 and 17:52 UK time on weekdays.'}</span></div>`;
   if (!b) return heading + statusBar + `<div class="panel">${emptyBlock('news', briefingUi.loaded ? 'Your first briefing is on its way' : 'Loading your briefing…', 'It covers a market overview, news for each of your holdings, leading headlines and areas to focus on. Start one now or wait for the next scheduled update.')}</div>` + generalNewsSection(null, () => true) + cmcSection() + cryptoSection();
   const m = b.market;
@@ -1890,8 +1896,8 @@ function headlinesPanel(b, pass) {
     .filter((i) => { const k = i.url; if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((x, y) => (Date.parse(y.publishedAt || '') || 0) - (Date.parse(x.publishedAt || '') || 0));
   const note = b.premiumStatus === 'unavailable'
-    ? `<div class="market-status warning" style="margin:0 0 8px">${icon('info')}<span>FT, NYT, WSJ and The Economist headlines could not be loaded in the last update.</span></div>` : '';
-  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today, including the FT, NYT, WSJ and The Economist</p></div></div>
+    ? `<div class="market-status warning" style="margin:0 0 8px">${icon('info')}<span>The RSS headlines (FT, NYT, WSJ, The Economist, Kathimerini, Naftemporiki, Oikonomikos Taxydromos, Euronews, CNN, BBC) could not be loaded in the last update.</span></div>` : '';
+  return `<div class="panel" style="margin-top:16px"><div class="panel-header"><div><h2 class="panel-title">Market headlines</h2><p class="panel-kicker">What a long-term UK investor should know today, from global and Greek sources</p></div></div>
     <div class="panel-body news-list">${note}${items.map((i) => newsItem(i)).join('') || '<p class="panel-kicker">No headlines match this filter.</p>'}</div></div>`;
 }
 function cryptoSection() {

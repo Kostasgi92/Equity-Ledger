@@ -1,4 +1,5 @@
-"""Fetch free RSS headlines from FT, NYT, WSJ and The Economist.
+"""Fetch free RSS headlines from FT, NYT, WSJ, The Economist, Kathimerini, Naftemporiki,
+Oikonomikos Taxydromos (ot.gr), Euronews, CNN and the BBC.
 
 Prints a JSON list of {publisher, title, url, publishedAt, summary} from the last
 72 hours, newest first. Feeds that fail are listed on stderr and skipped.
@@ -11,6 +12,12 @@ FEEDS = {
     "The New York Times": ["https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "https://rss.nytimes.com/services/xml/rss/nyt/YourMoney.xml"],
     "The Wall Street Journal": ["https://feeds.content.dowjones.io/public/rss/RSSMarketsMain", "https://feeds.content.dowjones.io/public/rss/RSSWorldNews", "https://feeds.content.dowjones.io/public/rss/RSSUSnews", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"],
     "The Economist": ["https://www.economist.com/finance-and-economics/rss.xml", "https://www.economist.com/business/rss.xml", "https://www.economist.com/leaders/rss.xml"],
+    "Kathimerini": ["https://www.kathimerini.gr/infeeds/rss/nx-rss-feed.xml", "https://www.kathimerini.gr/economy/feed/", "https://www.ekathimerini.com/infeeds/rss/nx-rss-feed.xml", "https://www.ekathimerini.com/economy/feed/"],
+    "Naftemporiki": ["https://www.naftemporiki.gr/feed/", "https://www.naftemporiki.gr/finance/feed/"],
+    "Oikonomikos Taxydromos": ["https://www.ot.gr/feed/"],
+    "Euronews": ["https://www.euronews.com/rss?format=mrss&level=theme&name=business", "https://www.euronews.com/rss?level=vertical&name=business", "https://www.euronews.com/rss"],
+    "CNN": ["https://rss.cnn.com/rss/edition_business.rss", "http://rss.cnn.com/rss/edition_business.rss", "http://rss.cnn.com/rss/money_latest.rss", "http://rss.cnn.com/rss/edition_world.rss"],
+    "BBC": ["https://feeds.bbci.co.uk/news/business/rss.xml", "https://feeds.bbci.co.uk/news/world/rss.xml"],
 }
 
 def text(block, tag):

@@ -20,10 +20,11 @@ a) Market overview for today (latest trading session): S&P 500, Nasdaq Composite
 b) For each holding except cash (at most 15, largest first): search "<ticker> <name> news" (for UK listings also try the name alone). Keep up to 4 relevant items from the last 7 days.
 c) 6-10 general market headlines a UK-based long-term investor should know today, spread across the sources where they have recent coverage.
 
-d) Headlines from the FT, The New York Times, The Wall Street Journal and The Economist come from their free RSS feeds, not from WebSearch (WebSearch cannot reach them). Write the script below to /tmp/premium_feeds.py with the Write tool, run `python3 /tmp/premium_feeds.py > /tmp/premium.json 2> /tmp/premium.err` in Bash, and read /tmp/premium.json. If it is empty and /tmp/premium.err shows every feed failed (for example "403 Forbidden"), set "premiumStatus": "unavailable" and "premiumNews": []. Otherwise set "premiumStatus": "ok" and choose up to 24 items for "premiumNews" (at most 6 per publisher), preferring markets, economy, central banks, UK, and anything about the user's holdings; keep each item's publisher, title, url and publishedAt exactly as the script returned them and write a one-sentence summary from its description. Also copy any item clearly about a specific holding into that holding's "items" in holdingsNews.
+d) Headlines from the FT, The New York Times, The Wall Street Journal, The Economist, Kathimerini, Naftemporiki, Oikonomikos Taxydromos (ot.gr), Euronews, CNN and the BBC come from their free RSS feeds, not from WebSearch (WebSearch cannot reach them). Write the script below to /tmp/premium_feeds.py with the Write tool, run `python3 /tmp/premium_feeds.py > /tmp/premium.json 2> /tmp/premium.err` in Bash, and read /tmp/premium.json. If it is empty and /tmp/premium.err shows every feed failed (for example "403 Forbidden"), set "premiumStatus": "unavailable" and "premiumNews": []. Otherwise set "premiumStatus": "ok" and choose up to 40 items for "premiumNews" (at most 5 per publisher, and include every publisher that returned items), preferring markets, economy, central banks, the UK and Greece, and anything about the user's holdings; keep each item's publisher, title, url and publishedAt exactly as the script returned them (Greek titles stay in Greek) and write a one-sentence summary from its description, in the same language as the title. Also copy any item clearly about a specific holding into that holding's "items" in holdingsNews.
 
 ```python
-"""Fetch free RSS headlines from FT, NYT, WSJ and The Economist.
+"""Fetch free RSS headlines from FT, NYT, WSJ, The Economist, Kathimerini, Naftemporiki,
+Oikonomikos Taxydromos (ot.gr), Euronews, CNN and the BBC.
 
 Prints a JSON list of {publisher, title, url, publishedAt, summary} from the last
 72 hours, newest first. Feeds that fail are listed on stderr and skipped.
@@ -36,6 +37,12 @@ FEEDS = {
     "The New York Times": ["https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "https://rss.nytimes.com/services/xml/rss/nyt/YourMoney.xml"],
     "The Wall Street Journal": ["https://feeds.content.dowjones.io/public/rss/RSSMarketsMain", "https://feeds.content.dowjones.io/public/rss/RSSWorldNews", "https://feeds.content.dowjones.io/public/rss/RSSUSnews", "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"],
     "The Economist": ["https://www.economist.com/finance-and-economics/rss.xml", "https://www.economist.com/business/rss.xml", "https://www.economist.com/leaders/rss.xml"],
+    "Kathimerini": ["https://www.kathimerini.gr/infeeds/rss/nx-rss-feed.xml", "https://www.kathimerini.gr/economy/feed/", "https://www.ekathimerini.com/infeeds/rss/nx-rss-feed.xml", "https://www.ekathimerini.com/economy/feed/"],
+    "Naftemporiki": ["https://www.naftemporiki.gr/feed/", "https://www.naftemporiki.gr/finance/feed/"],
+    "Oikonomikos Taxydromos": ["https://www.ot.gr/feed/"],
+    "Euronews": ["https://www.euronews.com/rss?format=mrss&level=theme&name=business", "https://www.euronews.com/rss?level=vertical&name=business", "https://www.euronews.com/rss"],
+    "CNN": ["https://rss.cnn.com/rss/edition_business.rss", "http://rss.cnn.com/rss/edition_business.rss", "http://rss.cnn.com/rss/money_latest.rss", "http://rss.cnn.com/rss/edition_world.rss"],
+    "BBC": ["https://feeds.bbci.co.uk/news/business/rss.xml", "https://feeds.bbci.co.uk/news/world/rss.xml"],
 }
 
 def text(block, tag):
@@ -122,7 +129,7 @@ Write the document to a local JSON file, then ArtifactData set, collection "data
   "premiumStatus": "ok | unavailable",
   "focusAreas": [{"title": "...", "rationale": "...", "type": "portfolio|market|research", "relatedTickers": []}],
   "riskNote": "This briefing is educational information, not regulated personal advice. Check suitability, costs and tax before acting.",
-  "sources": ["Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes", "Financial Times", "The New York Times", "The Wall Street Journal", "The Economist"]
+  "sources": ["Yahoo Finance", "Bloomberg", "CNBC", "Morningstar UK", "City AM", "Forbes", "Financial Times", "The New York Times", "The Wall Street Journal", "The Economist", "Kathimerini", "Naftemporiki", "Oikonomikos Taxydromos", "Euronews", "CNN", "BBC"]
 }
 
 Keep the whole document under 200 KB. Include holdings with no news found as {"ticker","name","items":[]}. After writing, reply with one line saying how many items you wrote.
