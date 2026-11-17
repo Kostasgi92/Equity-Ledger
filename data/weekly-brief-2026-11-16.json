@@ -1,0 +1,108 @@
+{
+  "edition": "Week of 16 November 2026",
+  "weekOf": "2026-11-16",
+  "readTime": "5 min read",
+  "source": "The Monday Brief",
+  "executiveSummary": {
+    "kicker": "Top Takeaway",
+    "headline": "Earnings resilience steadies stocks as inflation and tech upheaval jolt yields & crypto",
+    "body": "Global risk assets staged a choppy rebound last week as strong Q3 corporate earnings outweighed renewed inflation anxiety and major leadership upheaval in megacap tech. Higher-than-expected US inflation pushed Treasury yields back up and triggered a sharp crypto sell-off, while oil eased off October highs despite Middle East geopolitical risk.",
+    "highlights": [
+      { "label": "S&P 500 Q3 EPS", "value": "+32% YoY", "tone": "up" },
+      { "label": "US 10Y Yield", "value": ">5.10%", "tone": "up" },
+      { "label": "BoE Bank Rate", "value": "4.00%", "tone": "neutral" }
+    ]
+  },
+  "snapshotsNote": "Latest closes & weekend levels (13–15 Nov)",
+  "snapshots": [
+    { "name": "S&P 500", "value": "7,561.67", "move": "+2.51% weekly", "direction": "up", "category": "Equities" },
+    { "name": "Nasdaq Composite", "value": "25,136.27", "move": "+2.27% weekly", "direction": "up", "category": "Equities" },
+    { "name": "Dow Jones", "value": "52,347.55", "move": "Broadly steady", "direction": "neutral", "category": "Equities" },
+    { "name": "FTSE 100", "value": "~10,838", "move": "Slightly softer late week", "direction": "down", "category": "Equities" },
+    { "name": "US 10Y Treasury", "value": ">5.10%", "move": "Rebounded after hotter US CPI/PPI", "direction": "up", "category": "Rates & Macro" },
+    { "name": "Brent Crude", "value": "~$93.80–$98.45/bbl", "move": "Volatile; -9% MoM, +55% YoY", "direction": "neutral", "category": "Commodities" },
+    { "name": "WTI Crude", "value": "~$87.17/bbl", "move": "Firming late week", "direction": "up", "category": "Commodities" },
+    { "name": "Gold", "value": "~$3,901–$3,909/oz", "move": "Pulled back on higher yields", "direction": "down", "category": "Commodities" },
+    { "name": "Bitcoin (BTC)", "value": "~$64,000–$66,000", "move": "Broke below $70k", "direction": "down", "category": "Crypto" },
+    { "name": "Ethereum (ETH)", "value": "~$1,800–$1,820", "move": "Slipped below $1,850", "direction": "down", "category": "Crypto" }
+  ],
+  "marketsMacro": [
+    { "id": "mm-equities", "category": "Equities", "title": "Global Equities & Indices",
+      "summary": "US stocks rebounded despite Nvidia’s ~13% drop on leadership upheaval, buoyed by 32% YoY Q3 earnings growth.",
+      "metric": "SOX +8% · NVDA -13%",
+      "bullets": [
+        "Nvidia fell ~13% (erasing $500B in market value) after Jensen Huang’s resignation and CFO Colette Kress becoming interim CEO.",
+        "Despite Nvidia’s slide, the Philadelphia Semiconductor Index (SOX) still rallied ~8% on rotation into peers.",
+        "Q3 S&P 500 earnings are tracking ~32% YoY, with all 11 sectors on pace for positive full-year growth.",
+        "European and UK equities showed lower volatility than US peers given smaller megacap AI concentration."
+      ] },
+    { "id": "mm-macro", "category": "Central Banks", "title": "Macroeconomics & Central Banks",
+      "summary": "Hotter US inflation keeps a December Fed hike in play as the BoE and RBA tighten policy further.",
+      "metric": "US Core CPI +0.3% · BoE 4.00%",
+      "bullets": [
+        "US Oct Core CPI rose +0.3% MoM (above 0.2% consensus) alongside firmer PPI, keeping a December Fed hike firmly in focus.",
+        "UK markets are digesting the BoE’s 25 bps hike to 4.00% (8–1 vote, Catherine Mann dissenting for 50 bps) ahead of the 17 Dec meeting.",
+        "The Reserve Bank of Australia (RBA) hiked 25 bps to 4.85%.",
+        "Ongoing Iran conflict continues to keep global supply-chain pressures elevated."
+      ] },
+    { "id": "mm-fixed-income", "category": "Credit & Rates", "title": "Fixed Income & Credit",
+      "summary": "A four-week Treasury rally reversed on sticky US inflation, while corporate credit held firm.",
+      "metric": "US 10Y >5.10%",
+      "bullets": [
+        "Hotter US inflation reversed a 4-week Treasury rally, pushing the 10-year yield back above 5.10%.",
+        "Corporate credit remained resilient despite heavy new issuance from tech and AI-linked borrowers.",
+        "Investment-grade (IG) and high-yield (HY) spreads stayed contained, with higher-quality issuers outperforming."
+      ] },
+    { "id": "mm-commodities", "category": "Commodities", "title": "Commodities & Energy",
+      "summary": "Crude eased off October highs while elevated diesel spreads and higher real yields shaped metals.",
+      "metric": "Brent mid-$90s · Gold ~$3,900",
+      "bullets": [
+        "Crude cooled from October’s ~$108/bbl highs to mid-$90s Brent and ~$87 WTI.",
+        "Diesel crack spreads remain historically elevated, feeding through into freight and goods inflation.",
+        "Gold eased toward ~$3,900/oz as higher real yields pressured non-yielding bullion."
+      ] },
+    { "id": "mm-crypto", "category": "Digital Assets", "title": "Crypto & Digital Assets",
+      "summary": "Bitcoin broke below $70k amid institutional outflows and a record stablecoin supply contraction.",
+      "metric": "Stablecoin Supply -$11.5B",
+      "bullets": [
+        "Sharp drawdown saw BTC break $70k down to $64k–$66k, while ETH slipped to ~$1,800.",
+        "Selling was driven by institutional outflows and renewed Federal Reserve tightening fears.",
+        "Coinbase Institutional reported a record $11.5B 30-day contraction in combined USDT, USDC, and DAI supply."
+      ] },
+    { "id": "mm-regulation", "category": "Policy & Reg", "title": "Financial Regulation & Policy",
+      "summary": "Major UK PRA capital updates, FCA resilience & pension reviews, and EU-UK supervisory coordination.",
+      "metric": "PRA · FCA · EU-UK · BCBS",
+      "subTabs": [
+        { "key": "pra", "label": "UK PRA", "items": [
+          "Published Large Exposures Framework (Part 2) Policy Statement.",
+          "Consolidates non-core large exposures group (NCLEG) permissions into a single permission.",
+          "Introduces a firm-specific higher trading-book limit of 350% of Tier 1 capital (up from 250% originally consulted)."
+        ] },
+        { "key": "fca", "label": "UK FCA", "items": [
+          "Released multi-firm review on operational resilience for trading venues ahead of March 2027 incident-reporting rules.",
+          "Opened CP26/40 consultation on exempting performance fees from the workplace pensions charge cap."
+        ] },
+        { "key": "global", "label": "UK-EU & Global", "items": [
+          "UK Financial Services and Markets Bill passed Second Reading in the House of Commons (10 Nov).",
+          "Joint EU-UK Financial Regulatory Forum met on 11 Nov to coordinate cross-border supervision.",
+          "Basel Committee (BCBS) opened consultation on Pillar 2 IRRBB guidance.",
+          "EU adopted delegated regulations tightening ESG & transparency in credit rating methodologies."
+        ] }
+      ] }
+  ],
+  "sectors": [
+    { "name": "Technology & AI", "sentiment": "Mixed", "filterTags": ["Mixed"], "note": "Nvidia -13% on leadership news vs. SOX +8% rotation into non-Nvidia chipmakers." },
+    { "name": "Banking & Financial Services", "sentiment": "Bullish", "filterTags": ["Bullish"], "note": "Outperformed in UK/Europe on higher-for-longer NIM support; Standard Chartered posted a +46% profit jump." },
+    { "name": "Energy & Oil/Gas", "sentiment": "Mixed", "filterTags": ["Mixed"], "note": "Top 2026 performer on elevated crude and refining margins, pausing near-term as Brent eased from $100+." },
+    { "name": "Healthcare & Biotech", "sentiment": "Bullish", "filterTags": ["Bullish"], "note": "Acted as a defensive ballast during tech volatility, drawing strong institutional flows." },
+    { "name": "Industrials & Defence", "sentiment": "Mixed", "filterTags": ["Mixed"], "note": "Profit-taking in European defence; US industrial capex remains supported by power and data-centre demand." },
+    { "name": "Consumer & Retail", "sentiment": "Pressured", "filterTags": ["Pressured"], "note": "Hit by sticky inflation and high rates; UK BRC retail sales grew just +1.1% YoY in Oct, with staples beating discretionary." },
+    { "name": "Real Estate & Infrastructure", "sentiment": "Mixed / Pressured", "filterTags": ["Mixed", "Pressured"], "note": "Rate-sensitive property pressured by 5%+ US 10Y and 4.00% BoE (UK Lloyds HPI -0.6% MoM in Oct), while digital/power infra thrives (Anthropic $3.4B gas-powered data centre deal)." }
+  ],
+  "weekAheadNote": "Catalyst timeline · 16–20 November 2026",
+  "weekAhead": [
+    { "date": "Tue 17 Nov", "tag": "Earnings", "title": "Nvidia Q3 Earnings", "details": "Focus on data-centre demand, gross margins, and interim CEO Colette Kress’s commentary on leadership continuity & hyperscaler capex.", "impact": "High Impact" },
+    { "date": "Wed 18 – Thu 19 Nov", "tag": "IPO", "title": "Anthropic IPO (Pricing 18 Nov, Trading 19 Nov)", "details": "Reportedly ~6x oversubscribed at a $1.3T–$1.4T valuation; defining gauge for AI valuations and global capital markets appetite.", "impact": "High Impact" },
+    { "date": "All Week (16–20 Nov)", "tag": "Macro & Central Banks", "title": "UK & APAC Macro Data", "details": "Watch UK wage/earnings data (BoE Dec rate path), RBA minutes, Australian Q3 wage & jobs, India Oct CPI (forecast 12.1% on food/fuel), and Bank Indonesia rate decision (expected +25 bps to 6.0%).", "impact": "Key Macro" }
+  ]
+}
